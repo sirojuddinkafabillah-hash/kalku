@@ -6,7 +6,8 @@ import { Printer, ArrowLeft } from 'lucide-react';
 interface PrintReportViewProps {
   items: InventoryItem[];
   summary: GlobalSummary;
-  onBack: () => void;
+  modalAwal?: number;
+  onBack?: () => void;
 }
 
 export const PrintReportView: React.FC<PrintReportViewProps> = ({ items, summary, onBack }) => {
@@ -40,6 +41,9 @@ export const PrintReportView: React.FC<PrintReportViewProps> = ({ items, summary
 
       <div className="border-b-2 border-neutral-900 pb-4 mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-2">
         <div>
+          <div className="text-[11px] font-mono font-bold tracking-widest text-emerald-800 uppercase mb-0.5">
+            NIAGANOVA RETAIL MATRIX
+          </div>
           <h1 className="text-2xl font-bold tracking-tight text-neutral-900">
             LAPORAN PENJUALAN & EKUITAS ARUS KAS
           </h1>

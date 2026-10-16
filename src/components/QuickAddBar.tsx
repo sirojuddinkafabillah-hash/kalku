@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { InventoryItem } from '../types/inventory';
-import { calculateItem, formatRupiah } from '../utils/calculator';
-import { Plus, Calendar } from 'lucide-react';
+import { calculateItem, formatRupiah, formatAngka } from '../utils/calculator';
+import { Plus, Calendar, Package, Tag, ArrowRight, Sparkles } from 'lucide-react';
 
 interface QuickAddBarProps {
   onAdd: (item: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt'>) => void;
@@ -12,15 +12,15 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({ onAdd, globalSavePerce
   const todayStr = new Date().toISOString().slice(0, 10);
   const [tanggalInput, setTanggalInput] = useState(todayStr);
   const [namaBarang, setNamaBarang] = useState('');
+  const [satuanWadah, setSatuanWadah] = useState('Dus');
   const [jumlahWadah, setJumlahWadah] = useState<number | ''>('');
+  const [satuanUnit, setSatuanUnit] = useState('pcs');
   const [hargaBeli, setHargaBeli] = useState<number | ''>('');
-  const [jumlahJual, setJumlahJual] = useState<number | ''>(0); // Default 0 (Belum terjual!)
   const [hargaJual, setHargaJual] = useState<number | ''>('');
 
   const numJumlahWadah = Number(jumlahWadah) || 0;
   const numHargaBeli = Number(hargaBeli) || 0;
   const numHargaJual = Number(hargaJual) || 0;
-  const numJumlahJual = Number(jumlahJual) || 0;
 
   const hasBasicData = numJumlahWadah > 0 && numHargaBeli > 0 && numHargaJual > 0;
 
@@ -28,11 +28,11 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({ onAdd, globalSavePerce
     ? calculateItem({
         id: 'tmp',
         namaBarang: namaBarang || 'Barang',
-        satuanWadah: 'Wadah',
+        satuanWadah: satuanWadah || 'Wadah',
         jumlahBarangWadah: numJumlahWadah,
-        satuanUnit: 'pcs',
+        satuanUnit: satuanUnit || 'pcs',
         hargaBeli: numHargaBeli,
-        jumlahBarangDijualSatuan: numJumlahJual,
+        jumlahBarangDijualSatuan: 0,
         hargaJualSatuan: numHargaJual,
         perputaranBulan: 1,
         persentaseLabaDisimpanBulanan: globalSavePercentMonthly,
@@ -51,11 +51,11 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({ onAdd, globalSavePerce
 
     onAdd({
       namaBarang: namaBarang.trim(),
-      satuanWadah: 'Wadah',
+      satuanWadah: satuanWadah || 'Wadah',
       jumlahBarangWadah: numJumlahWadah,
-      satuanUnit: 'pcs',
+      satuanUnit: satuanUnit || 'pcs',
       hargaBeli: numHargaBeli,
-      jumlahBarangDijualSatuan: numJumlahJual,
+      jumlahBarangDijualSatuan: 0, // Default 0 (belum ada yang laku)
       hargaJualSatuan: numHargaJual,
       perputaranBulan: 1,
       persentaseLabaDisimpanBulanan: globalSavePercentMonthly,
@@ -65,41 +65,44 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({ onAdd, globalSavePerce
     setNamaBarang('');
     setJumlahWadah('');
     setHargaBeli('');
-    setJumlahJual(0);
     setHargaJual('');
   };
 
   return (
-    <div className="bg-white/90 backdrop-blur-xs border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-xs mb-6">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-          <span>+ Input Barang Baru</span>
-        </h2>
-        <span className="text-[11px] text-slate-500">
-          Harga beli memotong modal tunai, untung otomatis dihitung saat ada barang terjual
-        </span>
+    <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/60 rounded-3xl p-5 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.4)] mb-6 transition-all">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+            <Package className="w-4 h-4" />
+          </div>
+          <h2 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+            Input Transaksi Barang Baru
+          </h2>
+        </div>
+        <p className="text-[11px] font-mono text-slate-400">
+          Uang kas kasir otomatis disesuaikan secara real-time saat barang dibeli dan terjual.
+        </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 lg:grid-cols-12 gap-3.5">
           {/* Tanggal Input */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-700 mb-1 flex items-center gap-1">
-              <Calendar className="w-3 h-3 text-slate-400" />
-              <span>Tanggal</span>
+          <div className="sm:col-span-1 md:col-span-2 lg:col-span-2">
+            <label className="block text-[11px] font-mono font-semibold text-slate-300 mb-1.5">
+              Tanggal Input
             </label>
             <input
               type="date"
               required
               value={tanggalInput}
               onChange={(e) => setTanggalInput(e.target.value)}
-              className="w-full px-2.5 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 font-mono"
+              className="w-full px-3 py-2 text-xs bg-slate-950/80 border border-slate-700/70 text-slate-100 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 font-mono transition-colors"
             />
           </div>
 
           {/* Nama Barang */}
-          <div className="md:col-span-1">
-            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+          <div className="sm:col-span-1 md:col-span-4 lg:col-span-4">
+            <label className="block text-[11px] font-mono font-semibold text-slate-300 mb-1.5">
               Nama Barang
             </label>
             <input
@@ -107,15 +110,15 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({ onAdd, globalSavePerce
               required
               value={namaBarang}
               onChange={(e) => setNamaBarang(e.target.value)}
-              placeholder="Contoh: Sprite"
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+              placeholder="Misal: Sprite Botol 390ml / Kopi 1 Dus"
+              className="w-full px-3 py-2 text-xs bg-slate-950/80 border border-slate-700/70 text-slate-100 placeholder:text-slate-500 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 font-sans transition-colors"
             />
           </div>
 
           {/* Isi Wadah */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-              Isi 1 Wadah
+          <div className="sm:col-span-1 md:col-span-2 lg:col-span-2">
+            <label className="block text-[11px] font-mono font-semibold text-slate-300 mb-1.5">
+              Isi (Unit/Pcs)
             </label>
             <input
               type="number"
@@ -123,96 +126,82 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({ onAdd, globalSavePerce
               required
               value={jumlahWadah}
               onChange={(e) => setJumlahWadah(e.target.value === '' ? '' : Number(e.target.value))}
-              placeholder="1 atau 24"
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-slate-900"
+              placeholder="Contoh: 24"
+              className="w-full px-3 py-2 text-xs bg-slate-950/80 border border-slate-700/70 text-slate-100 placeholder:text-slate-500 rounded-xl font-mono focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
             />
           </div>
 
-          {/* Harga Beli */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-              Harga Beli (Modal)
+          {/* Harga Beli Wadah */}
+          <div className="sm:col-span-1 md:col-span-2 lg:col-span-2">
+            <label className="block text-[11px] font-mono font-semibold text-slate-300 mb-1.5">
+              Harga Beli Wadah
             </label>
-            <input
-              type="number"
-              min="0"
-              step="100"
-              required
-              value={hargaBeli}
-              onChange={(e) => setHargaBeli(e.target.value === '' ? '' : Number(e.target.value))}
-              placeholder="32000"
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-slate-900"
-            />
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-mono text-xs">Rp</span>
+              <input
+                type="number"
+                min="0"
+                step="100"
+                required
+                value={hargaBeli}
+                onChange={(e) => setHargaBeli(e.target.value === '' ? '' : Number(e.target.value))}
+                placeholder="108.000"
+                className="w-full pl-9 pr-3 py-2 text-xs bg-slate-950/80 border border-slate-700/70 text-slate-100 placeholder:text-slate-500 rounded-xl font-mono focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+              />
+            </div>
           </div>
 
-          {/* Harga Jual */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+          {/* Harga Jual Satuan */}
+          <div className="sm:col-span-2 md:col-span-2 lg:col-span-2">
+            <label className="block text-[11px] font-mono font-semibold text-slate-300 mb-1.5">
               Harga Jual Satuan
             </label>
-            <input
-              type="number"
-              min="0"
-              step="50"
-              required
-              value={hargaJual}
-              onChange={(e) => setHargaJual(e.target.value === '' ? '' : Number(e.target.value))}
-              placeholder="74000"
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-slate-900"
-            />
-          </div>
-
-          {/* Terjual */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-              Terjual (Default 0)
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={jumlahJual}
-              onChange={(e) => setJumlahJual(e.target.value === '' ? '' : Number(e.target.value))}
-              placeholder="0"
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-slate-900"
-            />
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-mono text-xs">Rp</span>
+              <input
+                type="number"
+                min="0"
+                step="100"
+                required
+                value={hargaJual}
+                onChange={(e) => setHargaJual(e.target.value === '' ? '' : Number(e.target.value))}
+                placeholder="6.000"
+                className="w-full pl-9 pr-3 py-2 text-xs bg-slate-950/80 border border-slate-700/70 text-slate-100 placeholder:text-slate-500 rounded-xl font-mono focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 transition-colors"
+              />
+            </div>
           </div>
         </div>
 
-        <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="text-xs">
+        {/* Live Calculation Preview & Submit Button */}
+        <div className="pt-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-t border-slate-800">
+          <div className="flex items-center gap-3 text-xs font-mono text-slate-300 flex-wrap">
             {previewCalc ? (
-              <div className="flex items-center gap-2.5 flex-wrap text-slate-600 font-mono text-[11px]">
-                <span className="text-red-600 font-semibold">
-                  Potong Kas: -{formatRupiah(numHargaBeli)}
-                </span>
-                <span aria-hidden="true" className="text-slate-300">·</span>
-                {numJumlahJual === 0 ? (
-                  <span className="text-slate-500">
-                    Untung: <strong className="text-slate-700">Rp 0</strong> (Belum ada yang laku)
-                  </span>
-                ) : (
-                  <span className="text-emerald-700 font-semibold">
-                    Untung Nyata ({numJumlahJual} laku): +{formatRupiah(previewCalc.totalGainTerjual)}
-                  </span>
-                )}
-                <span aria-hidden="true" className="text-slate-300">·</span>
+              <div className="flex items-center gap-3 text-[11px] bg-slate-950/90 border border-emerald-500/30 px-3.5 py-1.5 rounded-xl flex-wrap shadow-inner">
                 <span>
-                  Masuk Kas: <strong className="text-slate-900 font-bold">+{formatRupiah(previewCalc.totalSetelahUntungTerjual)}</strong>
+                  HPP Pokok: <strong className="text-white">{formatRupiah(previewCalc.hppSatuan)}</strong>/unit
+                </span>
+                <span className="text-slate-700">|</span>
+                <span>
+                  Untung Satuan: <strong className="text-emerald-400 font-bold">+{formatRupiah(previewCalc.gainSatuan)}</strong> ({formatAngka(previewCalc.marginPersen, 1)}%)
+                </span>
+                <span className="text-slate-700">|</span>
+                <span>
+                  Potensi Laba Penuh: <strong className="text-amber-300 font-bold">+{formatRupiah(previewCalc.potensiTotalGain)}</strong>
                 </span>
               </div>
             ) : (
-              <span className="text-[11px] text-slate-400">
-                Isi data barang di atas untuk melihat perhitungan otomatis aliran modal kas Anda.
+              <span className="text-slate-400 font-mono text-[11px]">
+                Ketik harga beli dan harga jual untuk melihat simulasi HPP dan potensi margin keuntungan otomatis.
               </span>
             )}
           </div>
 
           <button
             type="submit"
-            className="flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 active:scale-[0.98] rounded-xl transition-all cursor-pointer shadow-xs shrink-0"
+            className="flex items-center justify-center gap-1.5 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] text-slate-950 text-xs font-mono font-bold rounded-xl shadow-lg shadow-emerald-500/25 transition-all cursor-pointer shrink-0"
           >
-            <Plus className="w-4 h-4" />
-            <span>+ Simpan Barang</span>
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+            <span>Simpan ke Tabel</span>
           </button>
         </div>
       </form>

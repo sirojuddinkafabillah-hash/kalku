@@ -64,19 +64,17 @@ export const ItemModal: React.FC<ItemModalProps> = ({
 
   const previewItem: InventoryItem = {
     id: 'preview',
-    namaBarang: namaBarang || 'Barang',
+    namaBarang: namaBarang || 'Barang Baru',
     satuanWadah,
-    jumlahBarangWadah,
+    jumlahBarangWadah: Number(jumlahBarangWadah) || 1,
     satuanUnit,
-    hargaBeli,
-    jumlahBarangDijualSatuan,
-    hargaJualSatuan,
+    hargaBeli: Number(hargaBeli) || 0,
+    jumlahBarangDijualSatuan: Number(jumlahBarangDijualSatuan) || 0,
+    hargaJualSatuan: Number(hargaJualSatuan) || 0,
     perputaranBulan,
     persentaseLabaDisimpanBulanan,
-    tanggalInput,
-    catatan,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt: 0,
+    updatedAt: 0,
   };
 
   const previewCalc = calculateItem(previewItem);
@@ -105,20 +103,20 @@ export const ItemModal: React.FC<ItemModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
-      <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+      <div className="bg-slate-900 border border-slate-700/80 text-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
           <div>
-            <h3 className="text-base font-bold text-slate-900">
+            <h3 className="text-base font-bold text-white tracking-tight">
               {editingItem ? 'Edit Data Barang' : 'Form Lengkap Tambah Barang'}
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Kelola nomor transaksi, tanggal input, modal, dan harga jual
+            <p className="text-xs text-slate-400 mt-0.5 font-mono">
+              Kelola nomor transaksi, tanggal input, modal beli, dan harga jual
             </p>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -127,8 +125,8 @@ export const ItemModal: React.FC<ItemModalProps> = ({
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
-                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+              <label className="block text-xs font-mono font-semibold text-slate-300 mb-1 flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-emerald-400" />
                 <span>Tanggal Transaksi</span>
               </label>
               <input
@@ -136,28 +134,28 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                 required
                 value={tanggalInput}
                 onChange={(e) => setTanggalInput(e.target.value)}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 font-mono"
+                className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:border-emerald-500 font-mono text-white"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Nama Barang <span className="text-red-500">*</span>
+              <label className="block text-xs font-mono font-semibold text-slate-300 mb-1">
+                Nama Barang <span className="text-emerald-400">*</span>
               </label>
               <input
                 type="text"
                 required
                 value={namaBarang}
                 onChange={(e) => setNamaBarang(e.target.value)}
-                placeholder="Contoh: Sprite, Minyak Bimoli 2L"
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                placeholder="Contoh: Sprite 390ml, Minyak 2L"
+                className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:border-emerald-500 text-white placeholder:text-slate-500"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-mono font-semibold text-slate-300 mb-1">
                 Wadah Pembelian (Grosir)
               </label>
               <div className="flex gap-2">
@@ -165,12 +163,12 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                   type="text"
                   value={satuanWadah}
                   onChange={(e) => setSatuanWadah(e.target.value)}
-                  className="flex-1 px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  className="flex-1 px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:border-emerald-500 text-white"
                 />
                 <select
                   onChange={(e) => e.target.value && setSatuanWadah(e.target.value)}
                   value=""
-                  className="px-2 py-2 text-xs bg-slate-100 border border-slate-300 rounded-lg text-slate-700"
+                  className="px-2.5 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-slate-200"
                 >
                   <option value="">Pilih</option>
                   {COMMON_CONTAINERS.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -179,8 +177,8 @@ export const ItemModal: React.FC<ItemModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Jumlah Isi 1 Wadah <span className="text-red-500">*</span>
+              <label className="block text-xs font-mono font-semibold text-slate-300 mb-1">
+                Jumlah Isi 1 Wadah <span className="text-emerald-400">*</span>
               </label>
               <input
                 type="number"
@@ -188,14 +186,14 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                 required
                 value={jumlahBarangWadah || ''}
                 onChange={(e) => setJumlahBarangWadah(Math.max(1, Number(e.target.value)))}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-slate-900"
+                className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl font-mono focus:outline-none focus:border-emerald-500 text-white"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-mono font-semibold text-slate-300 mb-1">
                 Satuan Eceran Dijual
               </label>
               <div className="flex gap-2">
@@ -203,12 +201,12 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                   type="text"
                   value={satuanUnit}
                   onChange={(e) => setSatuanUnit(e.target.value)}
-                  className="flex-1 px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  className="flex-1 px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:border-emerald-500 text-white"
                 />
                 <select
                   onChange={(e) => e.target.value && setSatuanUnit(e.target.value)}
                   value=""
-                  className="px-2 py-2 text-xs bg-slate-100 border border-slate-300 rounded-lg text-slate-700"
+                  className="px-2.5 py-2 text-xs bg-slate-800 border border-slate-700 rounded-xl text-slate-200"
                 >
                   <option value="">Pilih</option>
                   {COMMON_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
@@ -217,8 +215,8 @@ export const ItemModal: React.FC<ItemModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Harga Beli 1 Wadah (Modal) <span className="text-red-500">*</span>
+              <label className="block text-xs font-mono font-semibold text-slate-300 mb-1">
+                Harga Beli 1 Wadah (Modal) <span className="text-emerald-400">*</span>
               </label>
               <input
                 type="number"
@@ -227,17 +225,17 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                 required
                 value={hargaBeli || ''}
                 onChange={(e) => setHargaBeli(Math.max(0, Number(e.target.value)))}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-slate-900"
+                className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl font-mono focus:outline-none focus:border-emerald-500 text-white"
               />
-              <div className="mt-1 text-[11px] text-slate-500 font-mono">
-                HPP per {satuanUnit}: {formatRupiah(previewCalc.hppSatuan)}
+              <div className="mt-1 text-[11px] text-slate-400 font-mono">
+                HPP per {satuanUnit}: <strong className="text-slate-200">{formatRupiah(previewCalc.hppSatuan)}</strong>
               </div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <label className="block text-xs font-mono font-semibold text-slate-300 mb-1">
                 Jumlah Barang Dijual (Satuan)
               </label>
               <input
@@ -246,16 +244,16 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                 max={jumlahBarangWadah}
                 value={jumlahBarangDijualSatuan ?? 0}
                 onChange={(e) => setJumlahBarangDijualSatuan(Math.max(0, Number(e.target.value)))}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-slate-900"
+                className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl font-mono focus:outline-none focus:border-emerald-500 text-white"
               />
-              <div className="mt-1 text-[11px] text-slate-500 font-mono">
-                {jumlahBarangDijualSatuan === 0 ? 'Status: Belum terjual' : `Terjual: ${jumlahBarangDijualSatuan} pcs`}
+              <div className="mt-1 text-[11px] text-slate-400 font-mono">
+                {jumlahBarangDijualSatuan === 0 ? 'Status: Belum terjual' : `Terjual: ${jumlahBarangDijualSatuan} ${satuanUnit}`}
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Harga Jual per Satuan <span className="text-red-500">*</span>
+              <label className="block text-xs font-mono font-semibold text-slate-300 mb-1">
+                Harga Jual per Satuan <span className="text-emerald-400">*</span>
               </label>
               <input
                 type="number"
@@ -264,16 +262,16 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                 required
                 value={hargaJualSatuan || ''}
                 onChange={(e) => setHargaJualSatuan(Math.max(0, Number(e.target.value)))}
-                className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-slate-900"
+                className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl font-mono focus:outline-none focus:border-emerald-500 text-white"
               />
-              <div className="mt-1 text-[11px] text-slate-500 font-mono">
-                Potensi untung/pcs: +{formatRupiah(previewCalc.gainSatuan)}
+              <div className="mt-1 text-[11px] text-slate-400 font-mono">
+                Potensi untung/{satuanUnit}: <strong className="text-emerald-400 font-bold">+{formatRupiah(previewCalc.gainSatuan)}</strong>
               </div>
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
+            <label className="block text-xs font-mono font-semibold text-slate-300 mb-1">
               Catatan Barang (Opsional)
             </label>
             <input
@@ -281,31 +279,31 @@ export const ItemModal: React.FC<ItemModalProps> = ({
               value={catatan}
               onChange={(e) => setCatatan(e.target.value)}
               placeholder="Contoh: Stok kulakan agen, rak depan"
-              className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900"
+              className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:border-emerald-500 text-white placeholder:text-slate-500"
             />
           </div>
 
           {/* Live Preview Box */}
-          <div className="bg-slate-900 text-white rounded-xl p-4 text-xs space-y-3">
-            <div className="flex items-center gap-2 font-bold text-white">
+          <div className="bg-slate-950 rounded-xl border border-slate-800 p-4 text-xs space-y-3">
+            <div className="flex items-center gap-2 font-bold text-white font-mono text-[11px] uppercase tracking-wider">
               <Calculator className="w-4 h-4 text-emerald-400" />
-              <span>Hasil Perhitungan Nyata:</span>
+              <span>Simulasi Finansial Ritel:</span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-[11px]">
-              <div className="bg-slate-800 p-2 rounded">
+              <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-lg">
                 <span className="text-slate-400 block text-[10px]">Potong Modal:</span>
-                <span className="font-bold text-red-400 text-xs">-{formatRupiah(hargaBeli)}</span>
+                <span className="font-bold text-rose-400 text-xs">-{formatRupiah(hargaBeli)}</span>
               </div>
-              <div className="bg-slate-800 p-2 rounded">
-                <span className="text-slate-400 block text-[10px]">Untung Nyata Terjual:</span>
+              <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-lg">
+                <span className="text-slate-400 block text-[10px]">Untung Terjual:</span>
                 <span className="font-bold text-emerald-400 text-xs">+{formatRupiah(previewCalc.totalGainTerjual)}</span>
               </div>
-              <div className="bg-slate-800 p-2 rounded">
-                <span className="text-slate-400 block text-[10px]">Arus Kas Masuk:</span>
-                <span className="font-bold text-white text-xs">+{formatRupiah(previewCalc.totalSetelahUntungTerjual)}</span>
+              <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-lg">
+                <span className="text-slate-400 block text-[10px]">Uang Masuk:</span>
+                <span className="font-bold text-amber-300 text-xs">+{formatRupiah(previewCalc.totalSetelahUntungTerjual)}</span>
               </div>
-              <div className="bg-slate-800 p-2 rounded">
-                <span className="text-slate-400 block text-[10px]">Net ke Kas:</span>
+              <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-lg">
+                <span className="text-slate-400 block text-[10px]">Net ke Kasir:</span>
                 <span className={`font-bold text-xs ${previewCalc.totalSetelahUntungTerjual - hargaBeli >= 0 ? 'text-emerald-300' : 'text-rose-400'}`}>
                   {previewCalc.totalSetelahUntungTerjual - hargaBeli >= 0 ? '+' : ''}{formatRupiah(previewCalc.totalSetelahUntungTerjual - hargaBeli)}
                 </span>
@@ -313,19 +311,19 @@ export const ItemModal: React.FC<ItemModalProps> = ({
             </div>
           </div>
 
-          <div className="pt-2 border-t border-slate-200 flex justify-end gap-2">
+          <div className="pt-3 border-t border-slate-800 flex justify-end gap-2.5">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+              className="px-4 py-2 text-xs font-mono font-medium text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg cursor-pointer shadow-xs"
+              className="px-5 py-2 text-xs font-mono font-bold text-slate-950 bg-emerald-500 hover:bg-emerald-400 rounded-xl cursor-pointer shadow-md shadow-emerald-500/20 transition-all"
             >
-              Simpan
+              Simpan Barang
             </button>
           </div>
         </form>

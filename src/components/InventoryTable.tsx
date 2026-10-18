@@ -10,7 +10,6 @@ interface InventoryTableProps {
   onDeleteItem: (id: string) => void;
   onUpdateSoldQty: (id: string, delta: number) => void;
   onSetSoldQty: (id: string, qty: number) => void;
-  onResetToSampleData: () => void;
   onClearAll: () => void;
   selectedMonth: string;
   onSelectMonth: (month: string) => void;
@@ -23,7 +22,6 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
   onDeleteItem,
   onUpdateSoldQty,
   onSetSoldQty,
-  onResetToSampleData,
   onClearAll,
   selectedMonth,
   onSelectMonth,
@@ -184,20 +182,15 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
             )}
           </div>
 
-          {items.length === 0 ? (
+          {items.length > 0 && (
             <button
-              onClick={onResetToSampleData}
-              className="px-3.5 py-2 text-xs font-mono font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-colors whitespace-nowrap"
-            >
-              + Muat Contoh
-            </button>
-          ) : (
-            <button
+              type="button"
               onClick={onClearAll}
-              className="px-3 py-2 text-xs font-mono font-medium text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 border border-transparent hover:border-rose-900/50 rounded-xl cursor-pointer transition-colors whitespace-nowrap"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-medium text-slate-300 hover:text-rose-300 bg-rose-950/20 hover:bg-rose-950/50 border border-rose-900/40 hover:border-rose-500/50 rounded-xl cursor-pointer transition-all whitespace-nowrap active:scale-95"
               title="Kosongkan seluruh data tabel"
             >
-              Hapus Semua
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>Hapus Semua</span>
             </button>
           )}
         </div>
@@ -422,11 +415,12 @@ export const InventoryTable: React.FC<InventoryTableProps> = ({
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
+                          type="button"
                           onClick={() => onDeleteItem(item.id)}
-                          title="Hapus barang"
-                          className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                          title={`Hapus ${item.namaBarang}`}
+                          className="p-1.5 text-slate-400 hover:text-rose-300 hover:bg-rose-950/60 rounded-lg border border-transparent hover:border-rose-500/40 transition-all cursor-pointer active:scale-90"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-3.5 h-3.5 text-rose-400" />
                         </button>
                       </div>
                     </td>

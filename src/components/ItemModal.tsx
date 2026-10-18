@@ -147,7 +147,7 @@ export const ItemModal: React.FC<ItemModalProps> = ({
                 required
                 value={namaBarang}
                 onChange={(e) => setNamaBarang(e.target.value)}
-                placeholder="Contoh: Sprite 390ml, Minyak 2L"
+                placeholder="Contoh: Beras 5kg, Minyak Goreng 2L, Kopi Dus"
                 className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl focus:outline-none focus:border-emerald-500 text-white placeholder:text-slate-500"
               />
             </div>

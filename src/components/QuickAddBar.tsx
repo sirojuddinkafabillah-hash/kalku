@@ -110,7 +110,7 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({ onAdd, globalSavePerce
               required
               value={namaBarang}
               onChange={(e) => setNamaBarang(e.target.value)}
-              placeholder="Misal: Sprite Botol 390ml / Kopi 1 Dus"
+              placeholder="Misal: Air Mineral 600ml / Kopi Sachet 1 Dus"
               className="w-full px-3 py-2 text-xs bg-slate-950/80 border border-slate-700/70 text-slate-100 placeholder:text-slate-500 rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 font-sans transition-colors"
             />
           </div>

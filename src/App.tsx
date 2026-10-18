@@ -10,92 +10,43 @@ import { CashFlowGuideModal } from './components/CashFlowGuideModal';
 import { DownloadModal } from './components/DownloadModal';
 import { PrintReportView } from './components/PrintReportView';
 import { AuthModal } from './components/AuthModal';
+import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { CosmicInteractiveBackground, BackgroundTheme } from './components/CosmicInteractiveBackground';
 import { useAuth } from './context/AuthContext';
 import { 
   Cloud, 
   CheckCircle2, 
-  Clock, 
   ShieldCheck, 
   HelpCircle, 
   RefreshCw,
-  LogIn,
-  AlertCircle,
-  FileSpreadsheet
+  Database,
+  AlertCircle
 } from 'lucide-react';
-import { 
-  requestPersistentStorage, 
-  saveToIndexedDB, 
-  loadFromIndexedDB, 
-  syncToServer, 
-  fetchServerBackup 
-} from './utils/storageBackup';
 import {
-  saveUserProfile,
-  getUserProfile,
-  saveInventoryItemToCloud,
-  deleteInventoryItemFromCloud,
-  batchUploadToCloud,
-  subscribeUserItems,
-  fetchUserItemsOnce
-} from './services/firestoreSync';
-
-const ALL_STORAGE_KEYS = [
-  'kalkulator_penjualan_rolling_items',
-  'kalkulator_penjualan_monthly_items',
-  'kalkulator_penjualan_simple_items',
-  'kalkulator_dagang_items_v1',
-];
-const PERCENT_KEY = 'kalkulator_penjualan_monthly_save_pct';
-const MODAL_KEY = 'kalkulator_penjualan_modal_awal';
-
-function loadPersistedItems(): InventoryItem[] {
-  for (const key of ALL_STORAGE_KEYS) {
-    try {
-      const stored = localStorage.getItem(key);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.error('Error reading key:', key, e);
-    }
-  }
-  return [];
-}
+  fetchInventoryFromMongo,
+  saveItemToMongo,
+  updateItemInMongo,
+  deleteItemFromMongo,
+  clearAllItemsFromMongo,
+  saveSettingsToMongo,
+  batchRestoreToMongo,
+  checkMongoDbStatus,
+  MongoDbStatus
+} from './services/mongoApi';
 
 export default function App() {
-  const { user, loading: isAuthLoading } = useAuth();
+  const { user } = useAuth();
 
-  const [modalAwal, setModalAwal] = useState<number>(() => {
-    try {
-      const storedModal = localStorage.getItem(MODAL_KEY);
-      if (storedModal !== null && !isNaN(Number(storedModal))) {
-        return Number(storedModal);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return 50000;
-  });
+  // App Core State (Loaded directly from MongoDB Atlas)
+  const [modalAwal, setModalAwal] = useState<number>(50000);
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [globalSavePercentMonthly, setGlobalSavePercentMonthly] = useState<number>(50);
 
-  const [items, setItems] = useState<InventoryItem[]>(() => {
-    return loadPersistedItems();
-  });
-
-  const [globalSavePercentMonthly, setGlobalSavePercentMonthly] = useState<number>(() => {
-    try {
-      const storedPct = localStorage.getItem(PERCENT_KEY);
-      if (storedPct !== null) {
-        return Number(storedPct);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    return 50;
-  });
+  // Database status
+  const [isMongoLoading, setIsMongoLoading] = useState<boolean>(true);
+  const [mongoStatus, setMongoStatus] = useState<MongoDbStatus | null>(null);
+  const [isSavingMongo, setIsSavingMongo] = useState<boolean>(false);
+  const [notification, setNotification] = useState<string | null>(null);
 
   // Real-time ticking clock
   const [currentRealTime, setCurrentRealTime] = useState<string>(() => {
@@ -117,7 +68,11 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
 
-  // Cosmic Interactive Background theme
+  // Delete Confirmation State (Replaces window.confirm)
+  const [itemToDelete, setItemToDelete] = useState<InventoryItem | null>(null);
+  const [isConfirmClearAllOpen, setIsConfirmClearAllOpen] = useState<boolean>(false);
+
+  // Background Theme
   const [backgroundTheme, setBackgroundTheme] = useState<BackgroundTheme>(() => {
     try {
       const stored = localStorage.getItem('niaganova_bg_theme');
@@ -139,137 +94,74 @@ export default function App() {
     }
   };
 
-  // Cloud Sync Statuses
-  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
-  const [cloudNotification, setCloudNotification] = useState<string | null>(null);
-
-  // Auto-dismiss cloud notifications after 6 seconds
+  // Auto-dismiss notifications after 5 seconds
   useEffect(() => {
-    if (cloudNotification) {
+    if (notification) {
       const timer = setTimeout(() => {
-        setCloudNotification(null);
-      }, 6000);
+        setNotification(null);
+      }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [cloudNotification]);
+  }, [notification]);
 
-  // Request Persistent Browser Storage on mount
+  // 1. Initial Load from MongoDB Atlas (Not localStorage)
+  const loadMongoData = async () => {
+    setIsMongoLoading(true);
+    try {
+      // Clear old legacy localStorage keys to ensure pure MongoDB storage
+      try {
+        const legacyKeys = [
+          'kalkulator_penjualan_rolling_items',
+          'kalkulator_penjualan_monthly_items',
+          'kalkulator_penjualan_simple_items',
+          'kalkulator_dagang_items_v1',
+          'kalkulator_penjualan_modal_awal'
+        ];
+        for (const k of legacyKeys) {
+          localStorage.removeItem(k);
+        }
+      } catch (e) {
+        console.warn('LocalStorage cleanup:', e);
+      }
+
+      const [invData, dbStatus] = await Promise.all([
+        fetchInventoryFromMongo(),
+        checkMongoDbStatus(),
+      ]);
+
+      if (dbStatus) {
+        setMongoStatus(dbStatus);
+      }
+
+      if (invData && invData.success) {
+        setItems(invData.items || []);
+        if (typeof invData.modalAwal === 'number') {
+          setModalAwal(invData.modalAwal);
+        }
+        if (typeof invData.globalSavePercentMonthly === 'number') {
+          setGlobalSavePercentMonthly(invData.globalSavePercentMonthly);
+        }
+        setNotification(`Terhubung ke MongoDB Atlas (Cluster0). Data berhasil dimuat (${invData.items?.length || 0} barang).`);
+      }
+    } catch (err) {
+      console.error('Error loading from MongoDB Atlas:', err);
+      setNotification('Gagal memuat data dari MongoDB Atlas. Memeriksa koneksi...');
+    } finally {
+      setIsMongoLoading(false);
+    }
+  };
+
   useEffect(() => {
-    requestPersistentStorage();
+    loadMongoData();
+
+    // Check status periodically
+    const timer = setInterval(async () => {
+      const status = await checkMongoDbStatus();
+      if (status) setMongoStatus(status);
+    }, 30000);
+
+    return () => clearInterval(timer);
   }, []);
-
-  // FIRESTORE REAL-TIME SYNCHRONIZATION EFFECT
-  useEffect(() => {
-    if (!user) {
-      return;
-    }
-
-    let unsubscribeFirestore: (() => void) | undefined;
-
-    const setupUserCloudData = async () => {
-      setIsCloudSyncing(true);
-      try {
-        // 1. Fetch user store settings (modal awal)
-        const profile = await getUserProfile(user.uid);
-        if (profile && profile.modalAwal !== undefined) {
-          setModalAwal(profile.modalAwal);
-          localStorage.setItem(MODAL_KEY, String(profile.modalAwal));
-        } else {
-          // If first time, save current local modal awal to cloud
-          await saveUserProfile(user.uid, {
-            modalAwal: modalAwal,
-            email: user.email || '',
-            displayName: user.displayName || '',
-          });
-        }
-
-        // 2. Fetch items from cloud once
-        const cloudItems = await fetchUserItemsOnce(user.uid);
-
-        if (cloudItems.length > 0) {
-          // Cloud has data: use cloud data as single source of truth
-          setItems(cloudItems);
-          saveToIndexedDB(cloudItems);
-          for (const key of ALL_STORAGE_KEYS) {
-            localStorage.setItem(key, JSON.stringify(cloudItems));
-          }
-          setCloudNotification(`Data berhasil dimuat dari database cloud (${cloudItems.length} barang).`);
-        } else if (items.length > 0) {
-          // Cloud is empty, but local has items -> upload local items to cloud
-          await batchUploadToCloud(user.uid, items, modalAwal);
-          setCloudNotification(`Data lokal berhasil dicadangkan ke akun cloud (${items.length} barang).`);
-        }
-
-        // 3. Subscribe to real-time changes
-        unsubscribeFirestore = subscribeUserItems(user.uid, (syncedItems) => {
-          setItems(syncedItems);
-          saveToIndexedDB(syncedItems);
-          for (const key of ALL_STORAGE_KEYS) {
-            localStorage.setItem(key, JSON.stringify(syncedItems));
-          }
-        });
-      } catch (err: any) {
-        console.error('Failed to setup cloud sync:', err);
-      } finally {
-        setIsCloudSyncing(false);
-      }
-    };
-
-    setupUserCloudData();
-
-    return () => {
-      if (unsubscribeFirestore) {
-        unsubscribeFirestore();
-      }
-    };
-  }, [user]);
-
-  // Fallback initial load from IndexedDB or server when user is not logged in
-  useEffect(() => {
-    if (user) return; // Managed by Firestore
-
-    const initOfflineStorage = async () => {
-      try {
-        const idb = await loadFromIndexedDB();
-        if (idb && idb.items && idb.items.length > 0) {
-          setItems(idb.items);
-          if (idb.modalAwal) {
-            setModalAwal(idb.modalAwal);
-            localStorage.setItem(MODAL_KEY, String(idb.modalAwal));
-          }
-          return;
-        }
-
-        const serverData = await fetchServerBackup();
-        if (serverData && serverData.items && serverData.items.length > 0) {
-          setItems(serverData.items);
-          if (serverData.modalAwal) {
-            setModalAwal(serverData.modalAwal);
-            localStorage.setItem(MODAL_KEY, String(serverData.modalAwal));
-          }
-        }
-      } catch (e) {
-        console.error('Storage init error:', e);
-      }
-    };
-
-    if (items.length === 0) {
-      initOfflineStorage();
-    }
-  }, [user]);
-
-  // Local storage persistence
-  useEffect(() => {
-    for (const key of ALL_STORAGE_KEYS) {
-      try {
-        localStorage.setItem(key, JSON.stringify(items));
-      } catch (e) {
-        console.error(`Error saving ${key}:`, e);
-      }
-    }
-    saveToIndexedDB(items, modalAwal);
-    syncToServer(items, modalAwal);
-  }, [items, modalAwal]);
 
   // Filtered items by selected month
   const filteredMonthlyItems = useMemo(() => {
@@ -285,7 +177,7 @@ export default function App() {
     return calculateSummary(filteredMonthlyItems, modalAwal);
   }, [filteredMonthlyItems, modalAwal]);
 
-  // Handlers for Items
+  // Handlers for Items with MongoDB Atlas persistence
   const handleAddItem = async (newItemData: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt'>) => {
     const now = Date.now();
     const item: InventoryItem = {
@@ -296,18 +188,18 @@ export default function App() {
       persentaseLabaDisimpanBulanan: newItemData.persentaseLabaDisimpanBulanan ?? globalSavePercentMonthly,
     };
 
-    const nextItems = [item, ...items];
-    setItems(nextItems);
+    // Immediate optimistic update
+    setItems((prev) => [item, ...prev]);
 
-    if (user) {
-      setIsCloudSyncing(true);
-      try {
-        await saveInventoryItemToCloud(user.uid, item);
-      } catch (e) {
-        console.error('Failed to sync added item to cloud:', e);
-      } finally {
-        setIsCloudSyncing(false);
-      }
+    // Save to MongoDB Atlas
+    setIsSavingMongo(true);
+    try {
+      await saveItemToMongo(item);
+      setNotification(`Barang "${item.namaBarang}" berhasil disimpan ke MongoDB Atlas.`);
+    } catch (err) {
+      console.error('Failed to save item to MongoDB Atlas:', err);
+    } finally {
+      setIsSavingMongo(false);
     }
   };
 
@@ -319,28 +211,28 @@ export default function App() {
     let updatedTargetItem: InventoryItem | null = null;
 
     if (editId) {
-      const nextItems = items.map((i) => {
-        if (i.id === editId) {
-          const updated = {
-            ...i,
-            ...itemData,
-            updatedAt: now,
-          };
-          updatedTargetItem = updated;
-          return updated;
-        }
-        return i;
-      });
-      setItems(nextItems);
+      setItems((prev) =>
+        prev.map((i) => {
+          if (i.id === editId) {
+            const updated = {
+              ...i,
+              ...itemData,
+              updatedAt: now,
+            };
+            updatedTargetItem = updated;
+            return updated;
+          }
+          return i;
+        })
+      );
 
-      if (user && updatedTargetItem) {
-        setIsCloudSyncing(true);
+      if (updatedTargetItem) {
+        setIsSavingMongo(true);
         try {
-          await saveInventoryItemToCloud(user.uid, updatedTargetItem);
-        } catch (e) {
-          console.error('Failed to update item in cloud:', e);
+          await saveItemToMongo(updatedTargetItem);
+          setNotification(`Perubahan "${itemData.namaBarang}" disimpan ke MongoDB Atlas.`);
         } finally {
-          setIsCloudSyncing(false);
+          setIsSavingMongo(false);
         }
       }
     } else {
@@ -351,17 +243,14 @@ export default function App() {
         updatedAt: now,
         persentaseLabaDisimpanBulanan: itemData.persentaseLabaDisimpanBulanan ?? globalSavePercentMonthly,
       };
-      setItems([newItem, ...items]);
+      setItems((prev) => [newItem, ...prev]);
 
-      if (user) {
-        setIsCloudSyncing(true);
-        try {
-          await saveInventoryItemToCloud(user.uid, newItem);
-        } catch (e) {
-          console.error('Failed to add item to cloud:', e);
-        } finally {
-          setIsCloudSyncing(false);
-        }
+      setIsSavingMongo(true);
+      try {
+        await saveItemToMongo(newItem);
+        setNotification(`Barang "${newItem.namaBarang}" berhasil disimpan ke MongoDB Atlas.`);
+      } finally {
+        setIsSavingMongo(false);
       }
     }
 
@@ -369,113 +258,117 @@ export default function App() {
     setEditingItem(null);
   };
 
-  const handleDeleteItem = async (id: string) => {
-    if (window.confirm('Hapus barang ini dari pembukuan?')) {
-      const nextItems = items.filter((i) => i.id !== id);
-      setItems(nextItems);
+  // Triggered by row delete icon
+  const handleRequestDeleteItem = (id: string) => {
+    const target = items.find((i) => i.id === id);
+    if (target) {
+      setItemToDelete(target);
+    }
+  };
 
-      if (user) {
-        setIsCloudSyncing(true);
-        try {
-          await deleteInventoryItemFromCloud(user.uid, id);
-        } catch (e) {
-          console.error('Failed to delete item from cloud:', e);
-        } finally {
-          setIsCloudSyncing(false);
-        }
+  // Confirmed Delete execution (Fixed, works without window.confirm)
+  const handleConfirmDeleteItem = async () => {
+    if (!itemToDelete) return;
+    const { id, namaBarang } = itemToDelete;
+
+    // Optimistically update React state immediately
+    setItems((prev) => prev.filter((i) => i.id !== id));
+    setItemToDelete(null);
+
+    // Call MongoDB Atlas deletion
+    setIsSavingMongo(true);
+    try {
+      const ok = await deleteItemFromMongo(id);
+      if (ok) {
+        setNotification(`Barang "${namaBarang}" berhasil dihapus dari MongoDB Atlas.`);
+      } else {
+        setNotification(`Peringatan: Gagal menghapus "${namaBarang}" dari server MongoDB.`);
       }
+    } catch (err) {
+      console.error('Failed to delete item from MongoDB Atlas:', err);
+    } finally {
+      setIsSavingMongo(false);
+    }
+  };
+
+  // Triggered by "Hapus Semua" toolbar button
+  const handleRequestClearAll = () => {
+    setIsConfirmClearAllOpen(true);
+  };
+
+  // Confirmed Clear All execution (Fixed, works without window.confirm)
+  const handleConfirmClearAll = async () => {
+    setIsConfirmClearAllOpen(false);
+    setItems([]);
+
+    setIsSavingMongo(true);
+    try {
+      const ok = await clearAllItemsFromMongo();
+      if (ok) {
+        setNotification('Seluruh data barang berhasil dikosongkan dari MongoDB Atlas.');
+      }
+    } catch (err) {
+      console.error('Failed to clear items from MongoDB Atlas:', err);
+    } finally {
+      setIsSavingMongo(false);
     }
   };
 
   const handleUpdateSoldQty = async (id: string, delta: number) => {
-    let updatedItem: InventoryItem | null = null;
-    const nextItems = items.map((item) => {
-      if (item.id === id) {
-        const nextVal = Math.min(
-          item.jumlahBarangWadah,
-          Math.max(0, item.jumlahBarangDijualSatuan + delta)
-        );
-        const updated = {
-          ...item,
-          jumlahBarangDijualSatuan: nextVal,
-          updatedAt: Date.now(),
-        };
-        updatedItem = updated;
-        return updated;
-      }
-      return item;
-    });
-    setItems(nextItems);
+    let newQty = 0;
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id === id) {
+          newQty = Math.min(
+            item.jumlahBarangWadah,
+            Math.max(0, item.jumlahBarangDijualSatuan + delta)
+          );
+          return {
+            ...item,
+            jumlahBarangDijualSatuan: newQty,
+            updatedAt: Date.now(),
+          };
+        }
+        return item;
+      })
+    );
 
-    if (user && updatedItem) {
-      try {
-        await saveInventoryItemToCloud(user.uid, updatedItem);
-      } catch (e) {
-        console.error('Failed to update sold qty in cloud:', e);
-      }
+    try {
+      await updateItemInMongo(id, { jumlahBarangDijualSatuan: newQty });
+    } catch (e) {
+      console.error('Failed to update sold qty in MongoDB Atlas:', e);
     }
   };
 
   const handleSetSoldQty = async (id: string, qty: number) => {
-    let updatedItem: InventoryItem | null = null;
-    const nextItems = items.map((item) => {
-      if (item.id === id) {
-        const nextVal = Math.min(item.jumlahBarangWadah, Math.max(0, qty));
-        const updated = {
-          ...item,
-          jumlahBarangDijualSatuan: nextVal,
-          updatedAt: Date.now(),
-        };
-        updatedItem = updated;
-        return updated;
-      }
-      return item;
-    });
-    setItems(nextItems);
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id === id) {
+          const clamped = Math.min(item.jumlahBarangWadah, Math.max(0, qty));
+          return {
+            ...item,
+            jumlahBarangDijualSatuan: clamped,
+            updatedAt: Date.now(),
+          };
+        }
+        return item;
+      })
+    );
 
-    if (user && updatedItem) {
-      try {
-        await saveInventoryItemToCloud(user.uid, updatedItem);
-      } catch (e) {
-        console.error('Failed to set sold qty in cloud:', e);
-      }
+    try {
+      await updateItemInMongo(id, { jumlahBarangDijualSatuan: qty });
+    } catch (e) {
+      console.error('Failed to set sold qty in MongoDB Atlas:', e);
     }
   };
 
   const handleUpdateModalAwal = async (newModal: number) => {
     setModalAwal(newModal);
-    localStorage.setItem(MODAL_KEY, String(newModal));
-
-    if (user) {
-      try {
-        await saveUserProfile(user.uid, { modalAwal: newModal });
-      } catch (e) {
-        console.error('Failed to update modalAwal in cloud:', e);
-      }
-    }
-  };
-
-  const handleClearAll = async () => {
-    if (window.confirm('Kosongkan semua data barang dari tabel?')) {
-      if (user) {
-        setIsCloudSyncing(true);
-        try {
-          for (const item of items) {
-            await deleteInventoryItemFromCloud(user.uid, item.id);
-          }
-        } catch (e) {
-          console.error(e);
-        } finally {
-          setIsCloudSyncing(false);
-        }
-      }
-
-      setItems([]);
-      for (const k of ALL_STORAGE_KEYS) {
-        localStorage.removeItem(k);
-      }
-      saveToIndexedDB([], modalAwal);
-      syncToServer([], modalAwal);
+    try {
+      await saveSettingsToMongo(newModal, globalSavePercentMonthly);
+      setNotification(`Modal awal usaha Rp ${newModal.toLocaleString('id-ID')} disimpan ke MongoDB Atlas.`);
+    } catch (e) {
+      console.error('Failed to update modalAwal in MongoDB Atlas:', e);
     }
   };
 
@@ -483,73 +376,16 @@ export default function App() {
     setItems(restoredItems);
     if (restoredModalAwal !== undefined && restoredModalAwal >= 0) {
       setModalAwal(restoredModalAwal);
-      localStorage.setItem(MODAL_KEY, String(restoredModalAwal));
     }
 
-    if (user) {
-      setIsCloudSyncing(true);
-      try {
-        await batchUploadToCloud(user.uid, restoredItems, restoredModalAwal ?? modalAwal);
-        setCloudNotification('Data cadangan berhasil dipulihkan dan disinkronkan ke cloud.');
-      } catch (e) {
-        console.error('Failed to sync restored data to cloud:', e);
-      } finally {
-        setIsCloudSyncing(false);
-      }
-    }
-  };
-
-  const handleLoadUserSpriteExample = async () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const spriteSample: InventoryItem = {
-      id: `sample_sprite_${Date.now()}`,
-      namaBarang: 'Sprite Botol 390ml',
-      satuanWadah: 'Dus',
-      jumlahBarangWadah: 24,
-      satuanUnit: 'botol',
-      hargaBeli: 108000, // HPP 4.500
-      jumlahBarangDijualSatuan: 6, // 6 botol terjual
-      hargaJualSatuan: 6000, // Jual 6.000 (Untung 1.500 per botol)
-      perputaranBulan: 1,
-      persentaseLabaDisimpanBulanan: 50,
-      tanggalInput: today,
-      waktuInput: '09:30',
-      catatan: 'Contoh simulasi: 1 Dus isi 24 botol, modal Rp 108.000, jual Rp 6.000/botol',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    const nextItems = [spriteSample, ...items];
-    setItems(nextItems);
-
-    if (user) {
-      setIsCloudSyncing(true);
-      try {
-        await saveInventoryItemToCloud(user.uid, spriteSample);
-        setCloudNotification('Contoh Sprite berhasil ditambahkan dan disinkronkan ke database cloud.');
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setIsCloudSyncing(false);
-      }
-    }
-  };
-
-  const handleForceCloudSync = async () => {
-    if (!user) {
-      setIsAuthModalOpen(true);
-      return;
-    }
-
-    setIsCloudSyncing(true);
+    setIsSavingMongo(true);
     try {
-      await batchUploadToCloud(user.uid, items, modalAwal);
-      setCloudNotification(`Sinkronisasi manual berhasil! ${items.length} barang tersimpan aman di cloud.`);
-    } catch (e: any) {
-      console.error(e);
-      setCloudNotification('Gagal melakukan sinkronisasi cloud. Coba periksa koneksi internet.');
+      await batchRestoreToMongo(restoredItems, restoredModalAwal ?? modalAwal, globalSavePercentMonthly);
+      setNotification(`Data cadangan berhasil dipulihkan dan disimpan ke database MongoDB Atlas (${restoredItems.length} barang).`);
+    } catch (e) {
+      console.error('Failed to restore data to MongoDB Atlas:', e);
     } finally {
-      setIsCloudSyncing(false);
+      setIsSavingMongo(false);
     }
   };
 
@@ -577,47 +413,48 @@ export default function App() {
           onOpenGuide={() => setIsGuideModalOpen(true)}
           onOpenDownloadModal={() => setIsDownloadModalOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
-          isSyncingCloud={isCloudSyncing}
+          isSyncingCloud={isSavingMongo}
         />
 
-        {/* Cloud Status / Welcome Banner */}
-        {!user && !isAuthLoading && (
-          <div className="no-print bg-slate-950/80 backdrop-blur-md text-slate-300 px-4 py-2.5 text-xs border-b border-slate-800">
-            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="font-mono">
-                  <strong className="text-white">Penyimpanan Online Permanen:</strong> Masuk dengan akun email agar pembukuan dagang tidak hilang meski histori browser dihapus.
-                </span>
-              </div>
-              <button
-                onClick={() => setIsAuthModalOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl font-mono font-bold text-xs transition-colors cursor-pointer shrink-0 shadow-sm shadow-emerald-500/20"
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Masuk Akun</span>
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Dynamic Notification Toast */}
-        {cloudNotification ? (
-          <div className="no-print bg-emerald-950/85 backdrop-blur-md border-b border-emerald-500/30 px-4 py-2.5 text-xs text-emerald-200 animate-in fade-in">
+        {notification && (
+          <div className="no-print bg-slate-900/90 backdrop-blur-md border-b border-emerald-500/30 px-4 py-2.5 text-xs text-emerald-200 animate-in fade-in">
             <div className="max-w-7xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-2 font-mono">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span className="font-medium">{cloudNotification}</span>
+                <span className="font-medium">{notification}</span>
               </div>
               <button
-                onClick={() => setCloudNotification(null)}
+                type="button"
+                onClick={() => setNotification(null)}
                 className="text-emerald-400 hover:text-emerald-100 font-bold cursor-pointer ml-4 p-1"
               >
                 ✕
               </button>
             </div>
           </div>
-        ) : null}
+        )}
+
+        {/* MongoDB Atlas IP Whitelist Notice (if needed) */}
+        {mongoStatus?.needsIpWhitelist && (
+          <div className="no-print bg-amber-950/80 backdrop-blur-md border-b border-amber-500/40 px-4 py-2 text-xs text-amber-200">
+            <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 font-mono">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  <strong>Setup MongoDB Atlas:</strong> Mohon tambahkan <code className="bg-amber-900/60 px-1.5 py-0.5 rounded text-amber-100 font-bold">0.0.0.0/0</code> pada menu <strong>Network Access</strong> di dashboard MongoDB Atlas agar database dapat diakses penuh dari cloud.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={loadMongoData}
+                className="shrink-0 px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[10px] cursor-pointer transition-colors"
+              >
+                Cek Ulang
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Main Container */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
@@ -635,39 +472,37 @@ export default function App() {
                 <span className="text-[11px] font-mono text-slate-400 font-medium">
                   · {currentRealTime}
                 </span>
-                {user && (
-                  <span className="text-[11px] font-mono text-emerald-300 bg-emerald-950/70 border border-emerald-500/30 px-2 py-0.5 rounded-md font-medium">
-                    Akun: {user.email || 'Online'}
-                  </span>
-                )}
+
+                {/* MongoDB Atlas Live Database Badge */}
+                <div 
+                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-emerald-950/70 border border-emerald-500/30 text-emerald-300 text-[11px] font-mono font-semibold"
+                  title="Penyimpanan database: MongoDB Atlas Cluster0 (sirojuddinkafabillah_db_user)"
+                >
+                  <Database className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>MongoDB Atlas:</span>
+                  <span className="text-white font-bold">Online</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                </div>
               </div>
               <p className="text-xs text-slate-400 mt-1 font-sans">
-                Pencatatan penjualan per wadah dan satuan, perhitungan sisa kas kasir real-time, dan pemantauan perputaran modal usaha.
+                Penyimpanan tersentralisasi di server MongoDB Atlas. Perhitungan sisa kas kasir real-time dan pemantauan perputaran modal usaha.
               </p>
             </div>
 
             <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto font-mono">
-              {user ? (
-                <button
-                  onClick={handleForceCloudSync}
-                  disabled={isCloudSyncing}
-                  title="Sinkronkan data ke database cloud sekarang"
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-all shadow-xs disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isCloudSyncing ? 'animate-spin' : ''}`} />
-                  <span>{isCloudSyncing ? 'Sinkron...' : 'Sinkronkan'}</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => setIsAuthModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-xl cursor-pointer transition-all shadow-sm shadow-emerald-500/20"
-                >
-                  <Cloud className="w-3.5 h-3.5" />
-                  <span>Simpan Online</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={loadMongoData}
+                disabled={isMongoLoading}
+                title="Muat ulang data dari MongoDB Atlas"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-all shadow-xs disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isMongoLoading ? 'animate-spin' : ''}`} />
+                <span>{isMongoLoading ? 'Memuat...' : 'Refresh DB'}</span>
+              </button>
 
               <button
+                type="button"
                 onClick={() => setIsDownloadModalOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-all shadow-xs"
               >
@@ -676,15 +511,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={handleLoadUserSpriteExample}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-colors"
-                title="Tambahkan contoh simulasi produk Sprite 1 Dus"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
-                <span>+ Contoh Sprite</span>
-              </button>
-
-              <button
+                type="button"
                 onClick={() => setIsGuideModalOpen(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-colors"
               >
@@ -694,97 +521,109 @@ export default function App() {
             </div>
           </div>
 
-        {/* Rolling Cash Balance & Capital Cards Focusing on Sisa Kas */}
-        <SummaryCards
-          summary={summary}
-          modalAwal={modalAwal}
-          onUpdateModalAwal={handleUpdateModalAwal}
-          onOpenGuide={() => setIsGuideModalOpen(true)}
-          currentRealTime={currentRealTime}
-          bulanFilter={selectedMonth}
+          {/* Rolling Cash Balance & Capital Cards Focusing on Sisa Kas */}
+          <SummaryCards
+            summary={summary}
+            modalAwal={modalAwal}
+            onUpdateModalAwal={handleUpdateModalAwal}
+            onOpenGuide={() => setIsGuideModalOpen(true)}
+            currentRealTime={currentRealTime}
+            bulanFilter={selectedMonth}
+          />
+
+          {/* Quick Add Bar */}
+          <QuickAddBar
+            onAdd={handleAddItem}
+            globalSavePercentMonthly={globalSavePercentMonthly}
+          />
+
+          {/* Main Table with Numeric Sold Input, Sisa Kas & Real-Time Timestamps */}
+          <InventoryTable
+            items={items}
+            modalAwal={modalAwal}
+            onEditItem={(item) => {
+              setEditingItem(item);
+              setIsItemModalOpen(true);
+            }}
+            onDeleteItem={handleRequestDeleteItem}
+            onUpdateSoldQty={handleUpdateSoldQty}
+            onSetSoldQty={handleSetSoldQty}
+            onClearAll={handleRequestClearAll}
+            selectedMonth={selectedMonth}
+            onSelectMonth={setSelectedMonth}
+          />
+        </main>
+
+        {/* Footer */}
+        <footer className="no-print mt-auto border-t border-slate-800/80 bg-slate-950/80 backdrop-blur-xl py-5 text-center text-xs text-slate-400">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2.5 font-mono text-[11px]">
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
+              <span className="text-slate-300 font-semibold tracking-wide">NiagaNova Matrix</span>
+              <span className="text-slate-600">·</span>
+              <span>Kalkulator Dagang & Arus Kas Real-time</span>
+            </div>
+            <div className="flex items-center gap-2 text-slate-400">
+              <Database className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Database: <strong className="text-emerald-400">MongoDB Atlas</strong> (Cluster0)</span>
+            </div>
+          </div>
+        </footer>
+
+        {/* Modals */}
+        <ItemModal
+          isOpen={isItemModalOpen}
+          onClose={() => {
+            setIsItemModalOpen(false);
+            setEditingItem(null);
+          }}
+          onSave={handleSaveItem}
+          editingItem={editingItem}
         />
 
-        {/* Quick Add Bar */}
-        <QuickAddBar
-          onAdd={handleAddItem}
+        <CashFlowGuideModal
+          isOpen={isGuideModalOpen}
+          onClose={() => setIsGuideModalOpen(false)}
         />
 
-        {/* Main Table with Numeric Sold Input, Sisa Kas & Real-Time Timestamps */}
-        <InventoryTable
+        <DownloadModal
+          isOpen={isDownloadModalOpen}
+          onClose={() => setIsDownloadModalOpen(false)}
           items={items}
           modalAwal={modalAwal}
-          onEditItem={(item) => {
-            setEditingItem(item);
-            setIsItemModalOpen(true);
-          }}
-          onDeleteItem={handleDeleteItem}
-          onUpdateSoldQty={handleUpdateSoldQty}
-          onSetSoldQty={handleSetSoldQty}
-          onResetToSampleData={handleLoadUserSpriteExample}
-          onClearAll={handleClearAll}
-          selectedMonth={selectedMonth}
-          onSelectMonth={setSelectedMonth}
+          summary={summary}
+          onRestoreData={handleRestoreData}
+          onOpenAuthModal={() => setIsAuthModalOpen(true)}
         />
-      </main>
 
-      {/* Footer */}
-      <footer className="no-print mt-auto border-t border-slate-800/80 bg-slate-950/80 backdrop-blur-xl py-5 text-center text-xs text-slate-400">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2.5 font-mono text-[11px]">
-          <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
-            <span className="text-slate-300 font-semibold tracking-wide">NiagaNova Matrix</span>
-            <span className="text-slate-600">·</span>
-            <span>Kalkulator Dagang & Arus Kas Real-time</span>
-          </div>
-          <div className="text-slate-400">
-            {user ? (
-              <span className="text-emerald-400 font-medium">
-                ● Tersambung ke server cloud ({user.email})
-              </span>
-            ) : (
-              <span>Penyimpanan lokal aman. Masuk akun untuk sinkronisasi multi-perangkat.</span>
-            )}
-          </div>
-        </div>
-      </footer>
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+        />
 
-      {/* Modals */}
-      <ItemModal
-        isOpen={isItemModalOpen}
-        onClose={() => {
-          setIsItemModalOpen(false);
-          setEditingItem(null);
-        }}
-        onSave={handleSaveItem}
-        editingItem={editingItem}
-      />
+        {/* Dedicated Delete Confirmation Modal (Reliable, no window.confirm) */}
+        <DeleteConfirmModal
+          isOpen={!!itemToDelete}
+          onClose={() => setItemToDelete(null)}
+          onConfirm={handleConfirmDeleteItem}
+          item={itemToDelete}
+          mode="single"
+        />
 
-      <CashFlowGuideModal
-        isOpen={isGuideModalOpen}
-        onClose={() => setIsGuideModalOpen(false)}
-      />
+        {/* Dedicated Clear All Confirmation Modal */}
+        <DeleteConfirmModal
+          isOpen={isConfirmClearAllOpen}
+          onClose={() => setIsConfirmClearAllOpen(false)}
+          onConfirm={handleConfirmClearAll}
+          mode="all"
+        />
 
-      <DownloadModal
-        isOpen={isDownloadModalOpen}
-        onClose={() => setIsDownloadModalOpen(false)}
-        items={items}
-        modalAwal={modalAwal}
-        summary={summary}
-        onRestoreData={handleRestoreData}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
-      />
-
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-      />
-
-      {/* Print View Component */}
-      <PrintReportView
-        items={filteredMonthlyItems}
-        summary={summary}
-        modalAwal={modalAwal}
-      />
+        {/* Print View Component */}
+        <PrintReportView
+          items={filteredMonthlyItems}
+          summary={summary}
+          modalAwal={modalAwal}
+        />
       </div>
     </div>
   );

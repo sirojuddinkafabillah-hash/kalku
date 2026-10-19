@@ -400,9 +400,21 @@ export default function App() {
     window.print();
   };
 
-  const handleImportSuccess = (importedItems: InventoryItem[], newModal?: number) => {
+  const handleImportSuccess = (
+    importedItems: InventoryItem[], 
+    newModal?: number, 
+    mode: 'append' | 'replace' = 'append'
+  ) => {
     if (typeof newModal === 'number' && newModal >= 0) {
       setModalAwal(newModal);
+    }
+    if (mode === 'replace') {
+      setItems(importedItems);
+    } else {
+      setItems((prev) => {
+        const incomingIds = new Set(importedItems.map(i => i.id));
+        return [...importedItems, ...prev.filter(p => !incomingIds.has(p.id))];
+      });
     }
     loadMongoData();
     setNotification(`Berhasil mengimpor ${importedItems.length} barang ke database MongoDB Atlas!`);

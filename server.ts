@@ -86,6 +86,79 @@ app.get('/api/inventory', async (_req, res) => {
   }
 });
 
+// Alias for backup / sync: GET & POST /api/data
+app.get('/api/data', async (_req, res) => {
+  try {
+    const db = await getDbInstance();
+    if (db) {
+      const itemsCollection = db.collection('inventory_items');
+      const settingsCollection = db.collection('settings');
+      const items = await itemsCollection.find({}).sort({ createdAt: -1 }).toArray();
+      const settings = await settingsCollection.findOne({ _id: 'app_settings' as any });
+      const sanitizedItems = items.map((doc: any) => {
+        const { _id, ...rest } = doc;
+        return rest;
+      });
+      return res.status(200).json({
+        success: true,
+        items: sanitizedItems,
+        modalAwal: settings?.modalAwal ?? 50000,
+        globalSavePercentMonthly: settings?.globalSavePercentMonthly ?? 50,
+      });
+    }
+    if (fs.existsSync(BACKUP_FILE)) {
+      const content = fs.readFileSync(BACKUP_FILE, 'utf-8');
+      const data = JSON.parse(content);
+      return res.status(200).json({
+        success: true,
+        items: data.items || [],
+        modalAwal: data.modalAwal ?? 50000,
+        globalSavePercentMonthly: data.globalSavePercentMonthly ?? 50,
+      });
+    }
+    return res.status(200).json({ success: true, items: [], modalAwal: 50000 });
+  } catch (err: any) {
+    return res.status(200).json({ success: false, items: [], modalAwal: 50000, message: err.message });
+  }
+});
+
+app.post('/api/data', async (req, res) => {
+  try {
+    const { items, modalAwal } = req.body;
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: 'Invalid items array' });
+    }
+    const db = await getDbInstance();
+    if (db && items.length > 0) {
+      const itemsCollection = db.collection('inventory_items');
+      const ops = items.map((it: any) => ({
+        updateOne: {
+          filter: { id: it.id },
+          update: { $set: it },
+          upsert: true,
+        },
+      }));
+      await itemsCollection.bulkWrite(ops, { ordered: false });
+    }
+    if (db && typeof modalAwal === 'number' && modalAwal >= 0) {
+      const settingsCollection = db.collection('settings');
+      await settingsCollection.updateOne(
+        { _id: 'app_settings' as any },
+        { $set: { modalAwal, updatedAt: Date.now() } },
+        { upsert: true }
+      );
+    }
+    // File fallback
+    try {
+      const currentData = { items, modalAwal: modalAwal ?? 50000 };
+      fs.writeFileSync(BACKUP_FILE, JSON.stringify(currentData, null, 2), 'utf-8');
+    } catch {}
+    return res.status(200).json({ success: true, message: 'Data synced successfully' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // 3. Save or update a single item in MongoDB Atlas
 app.post('/api/inventory/item', async (req, res) => {
   try {

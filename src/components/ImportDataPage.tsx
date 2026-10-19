@@ -126,16 +126,40 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Find column value by potential matching header names
-  const findValue = (row: any, candidates: string[]): any => {
+  // Find column value by potential matching header names or positional index
+  const findValue = (row: any, candidates: string[], fallbackPositionalIndex?: number): any => {
     if (!row || typeof row !== 'object') return undefined;
     const keys = Object.keys(row);
+    
+    // 1. Check exact or trimmed case-insensitive candidate match
     for (const cand of candidates) {
       const match = keys.find(k => k.trim().toLowerCase() === cand.toLowerCase());
-      if (match !== undefined && row[match] !== undefined && row[match] !== null) {
+      if (match !== undefined && row[match] !== undefined && row[match] !== null && String(row[match]).trim() !== '') {
         return row[match];
       }
     }
+
+    // 2. Check candidate contained in header key (fuzzy match)
+    for (const cand of candidates) {
+      const match = keys.find(k => k.toLowerCase().includes(cand.toLowerCase()));
+      if (match !== undefined && row[match] !== undefined && row[match] !== null && String(row[match]).trim() !== '') {
+        return row[match];
+      }
+    }
+
+    // 3. Fallback to positional index (e.g. column 2 for Nama Barang, column 4 for Harga Beli)
+    if (fallbackPositionalIndex !== undefined) {
+      // Check if __col_X exists
+      const colKey = `__col_${fallbackPositionalIndex}`;
+      if (row[colKey] !== undefined && row[colKey] !== null && String(row[colKey]).trim() !== '') {
+        return row[colKey];
+      }
+      const vals = Object.values(row);
+      if (vals[fallbackPositionalIndex] !== undefined && vals[fallbackPositionalIndex] !== null && String(vals[fallbackPositionalIndex]).trim() !== '') {
+        return vals[fallbackPositionalIndex];
+      }
+    }
+
     return undefined;
   };
 
@@ -152,24 +176,29 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
         return;
       }
 
-      // 1. Nama Barang
-      const namaBarang = String(findValue(row, [
+      // 1. Nama Barang (Index 2 in 12-column layout)
+      let namaBarang = String(findValue(row, [
         'Nama Barang', 'nama barang', 'nama_barang', 'nama', 'barang', 'item', 'produk', 'nama produk', 
         'deskripsi', 'description', 'uraian', 'product', 'nama_produk', 'kode/nama', 'title'
-      ]) || '').trim();
+      ], 2) || '').trim();
 
-      // 2. Satuan Wadah (default 'Dus' or read from wadah)
+      // If namaBarang looks like a number and row has no headers, check index 1 or 2
+      if (!namaBarang && row['__col_2']) {
+        namaBarang = String(row['__col_2']).trim();
+      }
+
+      // 2. Satuan Wadah (default 'Dus')
       const satuanWadah = String(findValue(row, [
         'Satuan Wadah', 'satuan wadah', 'satuan_wadah', 'wadah', 'kemasan', 'satuan beli', 'packaging', 
         'pack', 'dus', 'karton', 'satuan', 'unit wadah', 'satuan_beli'
       ]) || 'Dus').trim();
 
-      // 3. Jumlah 1 Wadah (exact match with user image column)
+      // 3. Jumlah 1 Wadah (Index 3 in 12-column layout)
       let jumlahBarangWadah = parseIndonesianNumber(findValue(row, [
         'Jumlah 1 Wadah', 'jumlah 1 wadah', 'isi wadah', 'isi', 'jumlah barang wadah', 'qty wadah', 'isi 1 wadah', 
         'jumlah', 'qty', 'kuantitas', 'kapasitas', 'isi per wadah', 'pcs per dus', 'isi dus', 
         'isi karton', 'banyaknya', 'isi_wadah', 'jumlah_barang_wadah', 'isi/kemasan', 'pcs/dus'
-      ]));
+      ], 3));
       if (jumlahBarangWadah <= 0) jumlahBarangWadah = 1;
 
       // 4. Satuan Unit
@@ -177,30 +206,30 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
         'Satuan Unit', 'satuan unit', 'satuan_unit', 'unit', 'satuan kecil', 'satuan jual', 'satuan_ecer', 'satuan_eceran', 'pcs'
       ]) || 'pcs').trim();
 
-      // 5. Harga Beli 1 Wadah (exact match with user image column)
+      // 5. Harga Beli 1 Wadah (Index 4 in 12-column layout)
       let hargaBeli = parseIndonesianNumber(findValue(row, [
         'Harga Beli 1 Wadah', 'harga beli 1 wadah', 'harga beli', 'harga_beli', 'modal wadah', 'modal', 'beli', 
         'buy price', 'cost', 'hpp', 'harga pokok', 'harga kulakan', 'harga modal', 'harga grosir', 
         'kulakan', 'total modal', 'modal beli', 'harga beli wadah', 'harga_beli_wadah'
-      ]));
+      ], 4));
 
-      // 6. Harga Jual Satuan (exact match with user image column)
+      // 6. Harga Jual Satuan (Index 6 in 12-column layout)
       let hargaJualSatuan = parseIndonesianNumber(findValue(row, [
         'Harga Jual Satuan', 'harga jual satuan', 'harga jual', 'harga_jual', 'harga_jual_satuan', 'jual', 
         'harga ecer', 'harga eceran', 'sell price', 'price', 'tarif', 'harga jual eceran', 
         'pricelist', 'harga_eceran', 'harga_jual_unit'
-      ]));
+      ], 6));
 
-      // 7. Jumlah Terjual Satuan (exact match with user image column)
+      // 7. Jumlah Terjual Satuan (Index 5 in 12-column layout)
       const jumlahBarangDijualSatuan = parseIndonesianNumber(findValue(row, [
         'Jumlah Terjual Satuan', 'jumlah terjual satuan', 'jumlah terjual', 'terjual', 'jumlah_terjual', 
         'unit terjual', 'laku', 'sold', 'qty jual', 'sudah laku', 'terjual satuan', 'penjualan', 'qty terjual', 'terjual (unit)'
-      ])) || 0;
+      ], 5)) || 0;
 
-      // 8. Tanggal Input (exact match with user image column)
+      // 8. Tanggal Input (Index 1 in 12-column layout)
       const rawTanggal = findValue(row, [
         'Tanggal Input', 'tanggal input', 'tanggal', 'tgl', 'date', 'created_at', 'waktu', 'tanggal masuk', 'tanggal beli'
-      ]);
+      ], 1);
       const tanggalInput = formatExcelSerialDate(rawTanggal);
 
       // 9. Catatan
@@ -253,11 +282,95 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
     if (parsed.length === 0) {
       setResultMessage({
         type: 'error',
-        text: 'Tidak ada baris data yang terbaca. Pastikan tabel memiliki baris header dan isi data.'
+        text: 'Tidak ada baris data yang terbaca. Pastikan tabel memiliki baris data barang.'
+      });
+    } else {
+      const validC = parsed.filter(p => p.isValid).length;
+      setResultMessage({
+        type: 'success',
+        text: `Berhasil membaca ${parsed.length} baris data (${validC} barang siap disimpan). Silakan periksa pratinjau tabel di bawah lalu klik tombol "Proses Impor" untuk menyimpan.`
       });
     }
 
     setParsedRows(parsed);
+  };
+
+  // Generic delimited text parser (CSV, TSV, Copy-Paste)
+  const parseDelimitedText = (text: string, sourceName: string) => {
+    const lines = text.trim().split(/\r?\n/).filter(line => line.trim().length > 0);
+    if (lines.length === 0) {
+      setResultMessage({ type: 'error', text: 'Teks tidak memiliki baris data.' });
+      return;
+    }
+
+    // Auto-detect delimiter from sample
+    const sample = lines.slice(0, 5).join('\n');
+    const tabCount = (sample.match(/\t/g) || []).length;
+    const semiCount = (sample.match(/;/g) || []).length;
+    const commaCount = (sample.match(/,/g) || []).length;
+    const pipeCount = (sample.match(/\|/g) || []).length;
+
+    let delimiter = '\t';
+    if (tabCount > semiCount && tabCount > commaCount) delimiter = '\t';
+    else if (semiCount >= commaCount && semiCount > 0) delimiter = ';';
+    else if (commaCount > 0) delimiter = ',';
+    else if (pipeCount > 0) delimiter = '|';
+
+    // Parse CSV line respecting quotes
+    const parseCSVLine = (line: string): string[] => {
+      const result: string[] = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"' || char === "'") {
+          inQuotes = !inQuotes;
+        } else if (char === delimiter && !inQuotes) {
+          result.push(cur.trim().replace(/^["']|["']$/g, ''));
+          cur = '';
+        } else {
+          cur += char;
+        }
+      }
+      result.push(cur.trim().replace(/^["']|["']$/g, ''));
+      return result;
+    };
+
+    // Locate header row or use positional
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+      const parts = parseCSVLine(lines[i]);
+      const lineText = parts.map(p => p.toLowerCase()).join(' ');
+      if (['nama', 'barang', 'item', 'produk', 'harga', 'beli', 'jual', 'wadah', 'modal'].some(kw => lineText.includes(kw))) {
+        headerIdx = i;
+        break;
+      }
+    }
+
+    const rows: any[] = [];
+    const isHeader = headerIdx !== -1;
+    const headers = isHeader ? parseCSVLine(lines[headerIdx]) : USER_IMAGE_HEADERS;
+    const dataStart = isHeader ? headerIdx + 1 : 0;
+
+    for (let i = dataStart; i < lines.length; i++) {
+      const parts = parseCSVLine(lines[i]);
+      if (parts.length === 0 || parts.every(p => p === '')) continue;
+      const rowObj: any = {};
+      headers.forEach((h, hIdx) => {
+        rowObj[h] = parts[hIdx] !== undefined ? parts[hIdx] : '';
+      });
+      parts.forEach((val, cIdx) => {
+        rowObj[`__col_${cIdx}`] = val;
+      });
+      rows.push(rowObj);
+    }
+
+    if (rows.length === 0) {
+      setResultMessage({ type: 'error', text: 'Gagal mengekstrak data dari teks CSV/Tabel.' });
+      return;
+    }
+
+    processRawData(rows, sourceName);
   };
 
   // Parse Text pasted from Excel or Google Sheets
@@ -266,54 +379,7 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
       setResultMessage({ type: 'error', text: 'Kotak teks masih kosong. Salin tabel dari Excel atau Google Sheets lalu tempel di sini.' });
       return;
     }
-
-    const lines = pastedText.trim().split(/\r?\n/).filter(line => line.trim().length > 0);
-    if (lines.length < 1) {
-      setResultMessage({ type: 'error', text: 'Teks tidak memiliki baris data.' });
-      return;
-    }
-
-    const firstLine = lines[0];
-    let delimiter = '\t';
-    if (firstLine.includes('\t')) {
-      delimiter = '\t';
-    } else if (firstLine.includes(';') && (firstLine.match(/;/g)?.length || 0) >= (firstLine.match(/,/g)?.length || 0)) {
-      delimiter = ';';
-    } else if (firstLine.includes(',')) {
-      delimiter = ',';
-    }
-
-    const headerCols = firstLine.split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
-    
-    const isHeader = headerCols.some(col => 
-      ['nama', 'barang', 'item', 'produk', 'wadah', 'isi', 'harga', 'beli', 'jual', 'terjual', 'modal'].some(kw => 
-        col.toLowerCase().includes(kw)
-      )
-    );
-
-    const rows: any[] = [];
-    const dataStartIndex = isHeader ? 1 : 0;
-    const finalHeaders = isHeader 
-      ? headerCols 
-      : ['No', 'Tanggal Input', 'Nama Barang', 'Jumlah 1 Wadah', 'Harga Beli 1 Wadah', 'Jumlah Terjual Satuan', 'Harga Jual Satuan'];
-
-    for (let i = dataStartIndex; i < lines.length; i++) {
-      const parts = lines[i].split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
-      if (parts.length === 0 || parts.every(p => p === '')) continue;
-
-      const rowObj: any = {};
-      finalHeaders.forEach((h, hIdx) => {
-        rowObj[h] = parts[hIdx] !== undefined ? parts[hIdx] : '';
-      });
-      rows.push(rowObj);
-    }
-
-    if (rows.length === 0) {
-      setResultMessage({ type: 'error', text: 'Gagal mengekstrak data dari teks yang ditempel.' });
-      return;
-    }
-
-    processRawData(rows, `Tempel Teks (${rows.length} Baris)`);
+    parseDelimitedText(pastedText, `Tempel Teks (${pastedText.split(/\r?\n/).length} Baris)`);
   };
 
   // Handle file reading
@@ -340,25 +406,102 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
         }
       };
       reader.readAsText(file);
-    } else if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
+    } else if (ext === 'csv' || ext === 'tsv' || ext === 'txt') {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const text = e.target?.result as string;
+          parseDelimitedText(text, file.name);
+        } catch (err) {
+          console.error('Error reading CSV text:', err);
+          setResultMessage({ type: 'error', text: 'Gagal membaca isi file CSV/Teks.' });
+        }
+      };
+      reader.readAsText(file);
+    } else if (ext === 'xlsx' || ext === 'xls') {
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: 'array', raw: false });
-          const firstSheetName = workbook.SheetNames[0];
-          const worksheet = workbook.Sheets[firstSheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+          
+          // Find first sheet with actual content
+          let worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          for (const sName of workbook.SheetNames) {
+            const cand = workbook.Sheets[sName];
+            if (cand && cand['!ref']) {
+              worksheet = cand;
+              break;
+            }
+          }
 
-          if (jsonData.length === 0) {
-            setResultMessage({ type: 'error', text: 'Lembar kerja pertama dalam file Excel/CSV kosong.' });
+          // Read 2D array of cells (with raw: false to keep text formatting like "32.000")
+          const raw2D: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '', raw: false });
+          
+          if (raw2D.length === 0) {
+            setResultMessage({ type: 'error', text: 'Lembar kerja pertama dalam file Excel kosong.' });
             return;
           }
 
-          processRawData(jsonData, file.name);
+          // Scan top 15 rows for header row
+          let headerRowIdx = -1;
+          for (let i = 0; i < Math.min(raw2D.length, 15); i++) {
+            const r = raw2D[i];
+            if (Array.isArray(r)) {
+              const rowText = r.map(c => String(c).toLowerCase()).join(' ');
+              if (['nama', 'barang', 'item', 'produk', 'harga', 'beli', 'jual', 'wadah', 'modal'].some(kw => rowText.includes(kw))) {
+                headerRowIdx = i;
+                break;
+              }
+            }
+          }
+
+          const extractedRows: any[] = [];
+          if (headerRowIdx !== -1) {
+            const detectedHeaders = raw2D[headerRowIdx].map(h => String(h || '').trim());
+            for (let i = headerRowIdx + 1; i < raw2D.length; i++) {
+              const r = raw2D[i];
+              if (!r || r.every(c => String(c).trim() === '')) continue;
+              const rowObj: any = {};
+              detectedHeaders.forEach((h, hIdx) => {
+                if (h) rowObj[h] = r[hIdx] !== undefined ? r[hIdx] : '';
+              });
+              r.forEach((val, cIdx) => {
+                rowObj[`__col_${cIdx}`] = val;
+              });
+              extractedRows.push(rowObj);
+            }
+          } else {
+            // Positional mapping
+            for (let i = 0; i < raw2D.length; i++) {
+              const r = raw2D[i];
+              if (!r || r.every(c => String(c).trim() === '')) continue;
+              const rowObj: any = {};
+              USER_IMAGE_HEADERS.forEach((h, hIdx) => {
+                rowObj[h] = r[hIdx] !== undefined ? r[hIdx] : '';
+              });
+              r.forEach((val, cIdx) => {
+                rowObj[`__col_${cIdx}`] = val;
+              });
+              extractedRows.push(rowObj);
+            }
+          }
+
+          if (extractedRows.length === 0) {
+            // Secondary fallback: standard sheet_to_json
+            const fallbackJson = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+            if (fallbackJson.length > 0) {
+              processRawData(fallbackJson, file.name);
+              return;
+            }
+            setResultMessage({ type: 'error', text: 'Tidak ada baris data barang yang terdeteksi di lembar kerja Excel.' });
+            return;
+          }
+
+          processRawData(extractedRows, file.name);
         } catch (err) {
           console.error('Error parsing spreadsheet:', err);
-          setResultMessage({ type: 'error', text: 'Gagal membaca file Excel/CSV. Pastikan format tabel memiliki baris header.' });
+          setResultMessage({ type: 'error', text: 'Gagal membaca file Excel. Pastikan format tabel memiliki baris header.' });
         }
       };
       reader.readAsArrayBuffer(file);
@@ -881,7 +1024,7 @@ No\tTanggal Input\tNama Barang\tJumlah 1 Wadah\tHarga Beli 1 Wadah\tJumlah Terju
               </div>
             </div>
 
-            <div className="flex items-center gap-2 font-mono text-xs">
+            <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
               <span className="px-2.5 py-1 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
                 ✓ {validCount} Siap Diimpor
               </span>
@@ -890,6 +1033,24 @@ No\tTanggal Input\tNama Barang\tJumlah 1 Wadah\tHarga Beli 1 Wadah\tJumlah Terju
                   ✕ {invalidCount} Tidak Valid
                 </span>
               )}
+              <button
+                type="button"
+                onClick={handleExecuteImport}
+                disabled={validCount === 0 || isProcessing}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-bold rounded-xl shadow-md shadow-emerald-500/20 transition-all cursor-pointer disabled:opacity-40"
+              >
+                {isProcessing ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Menyimpan...</span>
+                  </>
+                ) : (
+                  <>
+                    <Database className="w-3.5 h-3.5" />
+                    <span>Simpan & Terapkan ({validCount} Barang)</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
 
@@ -1001,6 +1162,46 @@ No\tTanggal Input\tNama Barang\tJumlah 1 Wadah\tHarga Beli 1 Wadah\tJumlah Terju
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Bottom Table Action Bar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-800">
+            <div className="text-xs font-mono text-slate-400">
+              Total <strong className="text-white">{parsedRows.length}</strong> baris data (<strong className="text-emerald-400">{validCount} valid</strong>)
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setParsedRows([]);
+                  setSelectedFileName(null);
+                  setPastedText('');
+                  setResultMessage(null);
+                }}
+                className="px-3 py-2 text-xs font-mono text-slate-400 hover:text-rose-300 hover:bg-rose-950/30 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Batal & Bersihkan</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteImport}
+                disabled={validCount === 0 || isProcessing}
+                className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-bold font-mono text-xs rounded-xl shadow-lg shadow-emerald-500/25 transition-all cursor-pointer disabled:opacity-40"
+              >
+                {isProcessing ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Menyimpan ke MongoDB Atlas...</span>
+                  </>
+                ) : (
+                  <>
+                    <Database className="w-4 h-4" />
+                    <span>Simpan & Terapkan ({validCount} Barang)</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

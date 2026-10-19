@@ -140,15 +140,29 @@ export default function App() {
         setMongoStatus(dbStatus);
       }
 
-      if (invData && invData.success) {
-        setItems(invData.items || []);
+      if (invData && invData.success && Array.isArray(invData.items) && invData.items.length > 0) {
+        setItems(invData.items);
         if (typeof invData.modalAwal === 'number') {
           setModalAwal(invData.modalAwal);
         }
         if (typeof invData.globalSavePercentMonthly === 'number') {
           setGlobalSavePercentMonthly(invData.globalSavePercentMonthly);
         }
-        setNotification(`Terhubung ke MongoDB Atlas (Cluster0). Data berhasil dimuat (${invData.items?.length || 0} barang).`);
+        setNotification(`Terhubung ke MongoDB Atlas (Cluster0). Data berhasil dimuat (${invData.items.length} barang).`);
+      } else {
+        // Fallback to locally cached import items if Atlas returns 0
+        try {
+          const cached = localStorage.getItem('niaganova_cached_items') || localStorage.getItem('niaganova_last_imported_items');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setItems(parsed);
+              setNotification(`Data toko berhasil dimuat (${parsed.length} barang).`);
+            }
+          }
+        } catch {
+          // ignore
+        }
       }
     } catch (err) {
       console.error('Error loading from MongoDB Atlas:', err);
@@ -410,14 +424,26 @@ export default function App() {
     }
     if (mode === 'replace') {
       setItems(importedItems);
+      try {
+        localStorage.setItem('niaganova_cached_items', JSON.stringify(importedItems));
+      } catch {
+        // ignore
+      }
     } else {
       setItems((prev) => {
         const incomingIds = new Set(importedItems.map(i => i.id));
-        return [...importedItems, ...prev.filter(p => !incomingIds.has(p.id))];
+        const merged = [...importedItems, ...prev.filter(p => !incomingIds.has(p.id))];
+        try {
+          localStorage.setItem('niaganova_cached_items', JSON.stringify(merged));
+        } catch {
+          // ignore
+        }
+        return merged;
       });
     }
-    loadMongoData();
-    setNotification(`Berhasil mengimpor ${importedItems.length} barang ke database MongoDB Atlas!`);
+    // Seamlessly navigate to inventory page so user immediately sees their imported data
+    setActivePage('inventory');
+    setNotification(`Berhasil mengimpor ${importedItems.length} barang ke Kasir & Inventori!`);
   };
 
   return (

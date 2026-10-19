@@ -99,8 +99,15 @@ export async function fetchServerBackup(): Promise<{ items: InventoryItem[] | nu
   try {
     const res = await fetch('/api/data');
     if (!res.ok) return { items: null, modalAwal: null };
-    const data = await res.json();
-    if (data.success && Array.isArray(data.items) && data.items.length > 0) {
+    const text = await res.text();
+    let data: any = null;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      console.warn('Server backup returned non-JSON:', text.slice(0, 80));
+      return { items: null, modalAwal: null };
+    }
+    if (data && data.success && Array.isArray(data.items) && data.items.length > 0) {
       return {
         items: data.items,
         modalAwal: typeof data.modalAwal === 'number' ? data.modalAwal : 50000,

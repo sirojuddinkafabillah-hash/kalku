@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { InventoryItem } from './types/inventory';
 import { calculateSummary } from './utils/calculator';
-import { Header } from './components/Header';
+import { Header, AppPage } from './components/Header';
 import { SummaryCards } from './components/SummaryCards';
 import { QuickAddBar } from './components/QuickAddBar';
 import { InventoryTable } from './components/InventoryTable';
@@ -11,6 +11,8 @@ import { DownloadModal } from './components/DownloadModal';
 import { PrintReportView } from './components/PrintReportView';
 import { AuthModal } from './components/AuthModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
+import { ReportsEquityPage } from './components/ReportsEquityPage';
+import { ImportDataPage } from './components/ImportDataPage';
 import { CosmicInteractiveBackground, BackgroundTheme } from './components/CosmicInteractiveBackground';
 import { useAuth } from './context/AuthContext';
 import { 
@@ -20,7 +22,9 @@ import {
   HelpCircle, 
   RefreshCw,
   Database,
-  AlertCircle
+  AlertCircle,
+  TrendingUp,
+  UploadCloud
 } from 'lucide-react';
 import {
   fetchInventoryFromMongo,
@@ -67,6 +71,9 @@ export default function App() {
   const [isDownloadModalOpen, setIsDownloadModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string>('all');
+
+  // Active Navigation Page (Kasir & Inventori, Laporan & Ekuitas, Impor Data)
+  const [activePage, setActivePage] = useState<AppPage>('inventory');
 
   // Delete Confirmation State (Replaces window.confirm)
   const [itemToDelete, setItemToDelete] = useState<InventoryItem | null>(null);
@@ -393,6 +400,14 @@ export default function App() {
     window.print();
   };
 
+  const handleImportSuccess = (importedItems: InventoryItem[], newModal?: number) => {
+    if (typeof newModal === 'number' && newModal >= 0) {
+      setModalAwal(newModal);
+    }
+    loadMongoData();
+    setNotification(`Berhasil mengimpor ${importedItems.length} barang ke database MongoDB Atlas!`);
+  };
+
   return (
     <div className="relative min-h-screen flex flex-col text-slate-100 selection:bg-emerald-500/30 selection:text-emerald-200 font-sans">
       {/* Dynamic Cursor-Interactive Background (Bintang, Titik, Campuran Gambar Dagang Bergerak Sesuai Kursor) */}
@@ -403,8 +418,11 @@ export default function App() {
 
       {/* Main Foreground Content */}
       <div className="relative z-10 flex flex-col min-h-screen">
-        {/* Top Header */}
+        {/* Top Header with Navigation */}
         <Header
+          activePage={activePage}
+          onChangePage={setActivePage}
+          itemsCount={items.length}
           onOpenAddModal={() => {
             setEditingItem(null);
             setIsItemModalOpen(true);
@@ -458,100 +476,129 @@ export default function App() {
 
         {/* Main Container */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-6">
-          {/* Title & Quick Actions Strip */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 p-4 sm:p-5 bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-700/60 shadow-[0_20px_50px_rgba(0,0,0,0.4)]">
-            <div>
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono font-bold tracking-wide">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  NIAGANOVA MATRIX
-                </span>
-                <h1 className="text-lg sm:text-xl font-extrabold tracking-tight text-white">
-                  Pencatatan Arus Kas & Sisa Modal
-                </h1>
-                <span className="text-[11px] font-mono text-slate-400 font-medium">
-                  · {currentRealTime}
-                </span>
+          {/* PAGE 1: KASIR & INVENTORI */}
+          {activePage === 'inventory' && (
+            <div className="space-y-6">
+              {/* Title & Quick Actions Strip */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:p-5 bg-slate-900/80 backdrop-blur-xl rounded-2xl border border-slate-700/60 shadow-[0_20px_50px_rgba(0,0,0,0.4)]">
+                <div>
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono font-bold tracking-wide">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      NIAGANOVA MATRIX
+                    </span>
+                    <h1 className="text-lg sm:text-xl font-extrabold tracking-tight text-white">
+                      Pencatatan Arus Kas & Sisa Modal
+                    </h1>
+                    <span className="text-[11px] font-mono text-slate-400 font-medium">
+                      · {currentRealTime}
+                    </span>
 
-                {/* MongoDB Atlas Live Database Badge */}
-                <div 
-                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-emerald-950/70 border border-emerald-500/30 text-emerald-300 text-[11px] font-mono font-semibold"
-                  title="Penyimpanan database: MongoDB Atlas Cluster0 (sirojuddinkafabillah_db_user)"
-                >
-                  <Database className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>MongoDB Atlas:</span>
-                  <span className="text-white font-bold">Online</span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                    {/* MongoDB Atlas Live Database Badge */}
+                    <div 
+                      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-emerald-950/70 border border-emerald-500/30 text-emerald-300 text-[11px] font-mono font-semibold"
+                      title="Penyimpanan database: MongoDB Atlas Cluster0 (sirojuddinkafabillah_db_user)"
+                    >
+                      <Database className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>MongoDB Atlas:</span>
+                      <span className="text-white font-bold">Online</span>
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 font-sans">
+                    Penyimpanan tersentralisasi di server MongoDB Atlas. Perhitungan sisa kas kasir real-time dan pemantauan perputaran modal usaha.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto font-mono">
+                  <button
+                    type="button"
+                    onClick={loadMongoData}
+                    disabled={isMongoLoading}
+                    title="Muat ulang data dari MongoDB Atlas"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-all shadow-xs disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isMongoLoading ? 'animate-spin' : ''}`} />
+                    <span>{isMongoLoading ? 'Memuat...' : 'Refresh DB'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActivePage('reports')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-all shadow-xs"
+                    title="Buka laporan penjualan dan ekuitas usaha"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Laporan & Ekuitas</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActivePage('import')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-all shadow-xs"
+                    title="Impor file Excel atau CSV"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Impor Data</span>
+                  </button>
                 </div>
               </div>
-              <p className="text-xs text-slate-400 mt-1 font-sans">
-                Penyimpanan tersentralisasi di server MongoDB Atlas. Perhitungan sisa kas kasir real-time dan pemantauan perputaran modal usaha.
-              </p>
+
+              {/* Rolling Cash Balance & Capital Cards Focusing on Sisa Kas */}
+              <SummaryCards
+                summary={summary}
+                modalAwal={modalAwal}
+                onUpdateModalAwal={handleUpdateModalAwal}
+                onOpenGuide={() => setIsGuideModalOpen(true)}
+                currentRealTime={currentRealTime}
+                bulanFilter={selectedMonth}
+              />
+
+              {/* Quick Add Bar */}
+              <QuickAddBar
+                onAdd={handleAddItem}
+                globalSavePercentMonthly={globalSavePercentMonthly}
+              />
+
+              {/* Main Table with Numeric Sold Input, Sisa Kas & Real-Time Timestamps */}
+              <InventoryTable
+                items={items}
+                modalAwal={modalAwal}
+                onEditItem={(item) => {
+                  setEditingItem(item);
+                  setIsItemModalOpen(true);
+                }}
+                onDeleteItem={handleRequestDeleteItem}
+                onUpdateSoldQty={handleUpdateSoldQty}
+                onSetSoldQty={handleSetSoldQty}
+                onClearAll={handleRequestClearAll}
+                selectedMonth={selectedMonth}
+                onSelectMonth={setSelectedMonth}
+              />
             </div>
+          )}
 
-            <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto font-mono">
-              <button
-                type="button"
-                onClick={loadMongoData}
-                disabled={isMongoLoading}
-                title="Muat ulang data dari MongoDB Atlas"
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-all shadow-xs disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-emerald-400 ${isMongoLoading ? 'animate-spin' : ''}`} />
-                <span>{isMongoLoading ? 'Memuat...' : 'Refresh DB'}</span>
-              </button>
+          {/* PAGE 2: LAPORAN PENJUALAN & EKUITAS */}
+          {activePage === 'reports' && (
+            <ReportsEquityPage
+              items={items}
+              modalAwal={modalAwal}
+              summary={summary}
+              selectedMonth={selectedMonth}
+              onSelectMonth={setSelectedMonth}
+              onPrintReport={handlePrint}
+            />
+          )}
 
-              <button
-                type="button"
-                onClick={() => setIsDownloadModalOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-all shadow-xs"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Cadangan</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsGuideModalOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl cursor-pointer transition-colors"
-              >
-                <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-                <span>Panduan</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Rolling Cash Balance & Capital Cards Focusing on Sisa Kas */}
-          <SummaryCards
-            summary={summary}
-            modalAwal={modalAwal}
-            onUpdateModalAwal={handleUpdateModalAwal}
-            onOpenGuide={() => setIsGuideModalOpen(true)}
-            currentRealTime={currentRealTime}
-            bulanFilter={selectedMonth}
-          />
-
-          {/* Quick Add Bar */}
-          <QuickAddBar
-            onAdd={handleAddItem}
-            globalSavePercentMonthly={globalSavePercentMonthly}
-          />
-
-          {/* Main Table with Numeric Sold Input, Sisa Kas & Real-Time Timestamps */}
-          <InventoryTable
-            items={items}
-            modalAwal={modalAwal}
-            onEditItem={(item) => {
-              setEditingItem(item);
-              setIsItemModalOpen(true);
-            }}
-            onDeleteItem={handleRequestDeleteItem}
-            onUpdateSoldQty={handleUpdateSoldQty}
-            onSetSoldQty={handleSetSoldQty}
-            onClearAll={handleRequestClearAll}
-            selectedMonth={selectedMonth}
-            onSelectMonth={setSelectedMonth}
-          />
+          {/* PAGE 3: IMPOR DATA (EXCEL / CSV / JSON) */}
+          {activePage === 'import' && (
+            <ImportDataPage
+              currentItemsCount={items.length}
+              currentModalAwal={modalAwal}
+              onImportSuccess={handleImportSuccess}
+              onNavigateToInventory={() => setActivePage('inventory')}
+            />
+          )}
         </main>
 
         {/* Footer */}

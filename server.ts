@@ -250,6 +250,55 @@ app.post('/api/inventory/batch', async (req, res) => {
   }
 });
 
+// 9. Batch Import endpoint (supports 'append' or 'replace')
+app.post('/api/inventory/import', async (req, res) => {
+  try {
+    const { items, mode = 'append', modalAwal } = req.body;
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: 'Invalid items array' });
+    }
+
+    const db = await getDbInstance();
+    if (db) {
+      const itemsCollection = db.collection('inventory_items');
+      const settingsCollection = db.collection('settings');
+
+      if (mode === 'replace') {
+        await itemsCollection.deleteMany({});
+      }
+
+      if (items.length > 0) {
+        const operations = items.map((item: any) => ({
+          updateOne: {
+            filter: { id: item.id },
+            update: { $set: item },
+            upsert: true,
+          },
+        }));
+        await itemsCollection.bulkWrite(operations);
+      }
+
+      if (typeof modalAwal === 'number' && modalAwal >= 0) {
+        await settingsCollection.updateOne(
+          { _id: 'app_settings' as any },
+          { $set: { modalAwal, updatedAt: Date.now() } },
+          { upsert: true }
+        );
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Berhasil mengimpor ${items.length} barang ke MongoDB Atlas`,
+      count: items.length,
+      mode,
+    });
+  } catch (err: any) {
+    console.error('Error importing items to MongoDB:', err);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Helper for local file fallback
 function syncToFileFallback(item: any, action: 'upsert' | 'delete') {
   try {

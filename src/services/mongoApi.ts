@@ -135,3 +135,23 @@ export async function checkMongoDbStatus(): Promise<MongoDbStatus | null> {
     return null;
   }
 }
+
+// 9. Batch Import items to MongoDB Atlas (supports 'append' or 'replace')
+export async function importItemsToMongo(
+  items: InventoryItem[],
+  mode: 'append' | 'replace' = 'append',
+  modalAwal?: number
+): Promise<{ success: boolean; message: string; count?: number }> {
+  try {
+    const res = await fetch('/api/inventory/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, mode, modalAwal }),
+    });
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    console.error('[MongoAPI] Import items error:', err);
+    return { success: false, message: err?.message || 'Gagal menghubungi server' };
+  }
+}

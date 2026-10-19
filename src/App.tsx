@@ -37,6 +37,14 @@ import {
   checkMongoDbStatus,
   MongoDbStatus
 } from './services/mongoApi';
+import {
+  saveInventoryItemToCloud,
+  deleteInventoryItemFromCloud,
+  saveUserProfile,
+  getUserProfile,
+  fetchUserItemsOnce,
+  batchUploadToCloud,
+} from './services/firestoreSync';
 
 export default function App() {
   const { user } = useAuth();
@@ -184,6 +192,60 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  // 2. Synchronize & Restore user data whenever user logs in or switches account
+  useEffect(() => {
+    if (!user) return;
+
+    let isMounted = true;
+    const syncUserData = async () => {
+      setIsSavingMongo(true);
+      try {
+        // Fetch user items & profile from Firestore
+        const [cloudItems, profile] = await Promise.all([
+          fetchUserItemsOnce(user.uid),
+          getUserProfile(user.uid),
+        ]);
+
+        if (!isMounted) return;
+
+        if (cloudItems && cloudItems.length > 0) {
+          // Cloud has data: restore to app!
+          setItems(cloudItems);
+          const restoredModal = typeof profile?.modalAwal === 'number' ? profile.modalAwal : 50000;
+          setModalAwal(restoredModal);
+          
+          try {
+            localStorage.setItem('niaganova_cached_items', JSON.stringify(cloudItems));
+          } catch {}
+
+          // Also sync to server/MongoDB Atlas so both databases are unified
+          await batchRestoreToMongo(cloudItems, restoredModal, globalSavePercentMonthly);
+          setNotification(`Data toko akun ${user.displayName || user.email} (${cloudItems.length} barang) berhasil dipulihkan dari Cloud Server!`);
+        } else {
+          // Cloud is empty for this user, but app has items in MongoDB / memory / cache:
+          // Automatically back up existing items into user's Firestore cloud account!
+          const invData = await fetchInventoryFromMongo();
+          const itemsToSync = (invData && invData.items && invData.items.length > 0) ? invData.items : items;
+          const modalToSync = invData?.modalAwal ?? modalAwal;
+
+          if (itemsToSync.length > 0) {
+            setItems(itemsToSync);
+            setModalAwal(modalToSync);
+            await batchUploadToCloud(user.uid, user.email || '', modalToSync, itemsToSync);
+            setNotification(`Akun terhubung: ${itemsToSync.length} barang berhasil disinkronkan ke Cloud Server!`);
+          }
+        }
+      } catch (err) {
+        console.warn('Sync user data warning:', err);
+      } finally {
+        if (isMounted) setIsSavingMongo(false);
+      }
+    };
+
+    syncUserData();
+    return () => { isMounted = false; };
+  }, [user?.uid]);
+
   // Filtered items by selected month
   const filteredMonthlyItems = useMemo(() => {
     if (selectedMonth === 'all') return items;
@@ -212,13 +274,16 @@ export default function App() {
     // Immediate optimistic update
     setItems((prev) => [item, ...prev]);
 
-    // Save to MongoDB Atlas
+    // Save to MongoDB Atlas & Firestore
     setIsSavingMongo(true);
     try {
       await saveItemToMongo(item);
-      setNotification(`Barang "${item.namaBarang}" berhasil disimpan ke MongoDB Atlas.`);
+      if (user) {
+        saveInventoryItemToCloud(user.uid, item).catch((e) => console.warn(e));
+      }
+      setNotification(`Barang "${item.namaBarang}" berhasil disimpan.`);
     } catch (err) {
-      console.error('Failed to save item to MongoDB Atlas:', err);
+      console.error('Failed to save item:', err);
     } finally {
       setIsSavingMongo(false);
     }
@@ -251,7 +316,10 @@ export default function App() {
         setIsSavingMongo(true);
         try {
           await saveItemToMongo(updatedTargetItem);
-          setNotification(`Perubahan "${itemData.namaBarang}" disimpan ke MongoDB Atlas.`);
+          if (user) {
+            saveInventoryItemToCloud(user.uid, updatedTargetItem).catch((e) => console.warn(e));
+          }
+          setNotification(`Perubahan "${itemData.namaBarang}" berhasil disimpan.`);
         } finally {
           setIsSavingMongo(false);
         }
@@ -269,7 +337,10 @@ export default function App() {
       setIsSavingMongo(true);
       try {
         await saveItemToMongo(newItem);
-        setNotification(`Barang "${newItem.namaBarang}" berhasil disimpan ke MongoDB Atlas.`);
+        if (user) {
+          saveInventoryItemToCloud(user.uid, newItem).catch((e) => console.warn(e));
+        }
+        setNotification(`Barang "${newItem.namaBarang}" berhasil disimpan.`);
       } finally {
         setIsSavingMongo(false);
       }
@@ -287,7 +358,7 @@ export default function App() {
     }
   };
 
-  // Confirmed Delete execution (Fixed, works without window.confirm)
+  // Confirmed Delete execution
   const handleConfirmDeleteItem = async () => {
     if (!itemToDelete) return;
     const { id, namaBarang } = itemToDelete;
@@ -296,17 +367,20 @@ export default function App() {
     setItems((prev) => prev.filter((i) => i.id !== id));
     setItemToDelete(null);
 
-    // Call MongoDB Atlas deletion
+    // Call MongoDB Atlas & Firestore deletion
     setIsSavingMongo(true);
     try {
       const ok = await deleteItemFromMongo(id);
+      if (user) {
+        deleteInventoryItemFromCloud(user.uid, id).catch((e) => console.warn(e));
+      }
       if (ok) {
-        setNotification(`Barang "${namaBarang}" berhasil dihapus dari MongoDB Atlas.`);
+        setNotification(`Barang "${namaBarang}" berhasil dihapus.`);
       } else {
-        setNotification(`Peringatan: Gagal menghapus "${namaBarang}" dari server MongoDB.`);
+        setNotification(`Barang "${namaBarang}" dihapus dari tampilan.`);
       }
     } catch (err) {
-      console.error('Failed to delete item from MongoDB Atlas:', err);
+      console.error('Failed to delete item:', err);
     } finally {
       setIsSavingMongo(false);
     }
@@ -317,7 +391,7 @@ export default function App() {
     setIsConfirmClearAllOpen(true);
   };
 
-  // Confirmed Clear All execution (Fixed, works without window.confirm)
+  // Confirmed Clear All execution
   const handleConfirmClearAll = async () => {
     setIsConfirmClearAllOpen(false);
     setItems([]);
@@ -325,11 +399,14 @@ export default function App() {
     setIsSavingMongo(true);
     try {
       const ok = await clearAllItemsFromMongo();
+      if (user) {
+        batchUploadToCloud(user.uid, user.email || '', modalAwal, []).catch((e) => console.warn(e));
+      }
       if (ok) {
-        setNotification('Seluruh data barang berhasil dikosongkan dari MongoDB Atlas.');
+        setNotification('Seluruh data barang berhasil dikosongkan.');
       }
     } catch (err) {
-      console.error('Failed to clear items from MongoDB Atlas:', err);
+      console.error('Failed to clear items:', err);
     } finally {
       setIsSavingMongo(false);
     }
@@ -356,8 +433,14 @@ export default function App() {
 
     try {
       await updateItemInMongo(id, { jumlahBarangDijualSatuan: newQty });
+      if (user) {
+        const it = items.find((i) => i.id === id);
+        if (it) {
+          saveInventoryItemToCloud(user.uid, { ...it, jumlahBarangDijualSatuan: newQty }).catch((e) => console.warn(e));
+        }
+      }
     } catch (e) {
-      console.error('Failed to update sold qty in MongoDB Atlas:', e);
+      console.error('Failed to update sold qty:', e);
     }
   };
 
@@ -378,8 +461,14 @@ export default function App() {
 
     try {
       await updateItemInMongo(id, { jumlahBarangDijualSatuan: qty });
+      if (user) {
+        const it = items.find((i) => i.id === id);
+        if (it) {
+          saveInventoryItemToCloud(user.uid, { ...it, jumlahBarangDijualSatuan: qty }).catch((e) => console.warn(e));
+        }
+      }
     } catch (e) {
-      console.error('Failed to set sold qty in MongoDB Atlas:', e);
+      console.error('Failed to set sold qty:', e);
     }
   };
 
@@ -387,24 +476,31 @@ export default function App() {
     setModalAwal(newModal);
     try {
       await saveSettingsToMongo(newModal, globalSavePercentMonthly);
-      setNotification(`Modal awal usaha Rp ${newModal.toLocaleString('id-ID')} disimpan ke MongoDB Atlas.`);
+      if (user) {
+        saveUserProfile(user.uid, user.email || '', newModal).catch((e) => console.warn(e));
+      }
+      setNotification(`Modal awal usaha Rp ${newModal.toLocaleString('id-ID')} tersimpan di Cloud.`);
     } catch (e) {
-      console.error('Failed to update modalAwal in MongoDB Atlas:', e);
+      console.error('Failed to update modalAwal:', e);
     }
   };
 
   const handleRestoreData = async (restoredItems: InventoryItem[], restoredModalAwal?: number) => {
     setItems(restoredItems);
+    const finalModal = restoredModalAwal !== undefined && restoredModalAwal >= 0 ? restoredModalAwal : modalAwal;
     if (restoredModalAwal !== undefined && restoredModalAwal >= 0) {
       setModalAwal(restoredModalAwal);
     }
 
     setIsSavingMongo(true);
     try {
-      await batchRestoreToMongo(restoredItems, restoredModalAwal ?? modalAwal, globalSavePercentMonthly);
-      setNotification(`Data cadangan berhasil dipulihkan dan disimpan ke database MongoDB Atlas (${restoredItems.length} barang).`);
+      await batchRestoreToMongo(restoredItems, finalModal, globalSavePercentMonthly);
+      if (user) {
+        await batchUploadToCloud(user.uid, user.email || '', finalModal, restoredItems);
+      }
+      setNotification(`Data toko (${restoredItems.length} barang) berhasil dipulihkan dan disinkronkan ke Cloud!`);
     } catch (e) {
-      console.error('Failed to restore data to MongoDB Atlas:', e);
+      console.error('Failed to restore data:', e);
     } finally {
       setIsSavingMongo(false);
     }
@@ -419,10 +515,14 @@ export default function App() {
     newModal?: number, 
     mode: 'append' | 'replace' = 'append'
   ) => {
+    const finalModal = typeof newModal === 'number' && newModal >= 0 ? newModal : modalAwal;
     if (typeof newModal === 'number' && newModal >= 0) {
       setModalAwal(newModal);
     }
+
+    let updatedList: InventoryItem[] = [];
     if (mode === 'replace') {
+      updatedList = importedItems;
       setItems(importedItems);
       try {
         localStorage.setItem('niaganova_cached_items', JSON.stringify(importedItems));
@@ -430,20 +530,26 @@ export default function App() {
         // ignore
       }
     } else {
-      setItems((prev) => {
-        const incomingIds = new Set(importedItems.map(i => i.id));
-        const merged = [...importedItems, ...prev.filter(p => !incomingIds.has(p.id))];
-        try {
-          localStorage.setItem('niaganova_cached_items', JSON.stringify(merged));
-        } catch {
-          // ignore
-        }
-        return merged;
-      });
+      const incomingIds = new Set(importedItems.map((i) => i.id));
+      updatedList = [...importedItems, ...items.filter((p) => !incomingIds.has(p.id))];
+      setItems(updatedList);
+      try {
+        localStorage.setItem('niaganova_cached_items', JSON.stringify(updatedList));
+      } catch {
+        // ignore
+      }
     }
+
+    // Always sync to Firestore cloud if user is logged in
+    if (user) {
+      batchUploadToCloud(user.uid, user.email || '', finalModal, updatedList).catch((e) =>
+        console.warn('[Firestore] Background cloud import backup warning:', e)
+      );
+    }
+
     // Seamlessly navigate to inventory page so user immediately sees their imported data
     setActivePage('inventory');
-    setNotification(`Berhasil mengimpor ${importedItems.length} barang ke Kasir & Inventori!`);
+    setNotification(`Berhasil mengimpor ${importedItems.length} barang! Tersimpan permanen di Cloud & Database Toko.`);
   };
 
   return (

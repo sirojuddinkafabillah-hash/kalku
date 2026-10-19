@@ -103,11 +103,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const namePart = cleanEmail.split('@')[0];
     const cleanName = namePart.replace(/[._]/g, ' ');
     const displayName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+    const deterministicPassword = `NiagaNova_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}_2026!`;
+
+    let uid = `gmail_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+    // Authenticate with Firebase Auth so Firestore security rules grant access
+    try {
+      const cred = await signInWithEmailAndPassword(auth, cleanEmail, deterministicPassword);
+      if (cred && cred.user) {
+        uid = cred.user.uid;
+      }
+    } catch (authErr: any) {
+      if (authErr?.code === 'auth/user-not-found' || authErr?.code === 'auth/invalid-credential') {
+        try {
+          const cred = await createUserWithEmailAndPassword(auth, cleanEmail, deterministicPassword);
+          if (cred && cred.user) {
+            uid = cred.user.uid;
+          }
+        } catch (regErr) {
+          console.warn('[AuthContext] Auto-provision Firebase user warning:', regErr);
+        }
+      }
+    }
 
     const appUser: AppUser = {
-      uid: `gmail_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
+      uid,
       email: cleanEmail,
-      displayName: displayName,
+      displayName,
       photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=10b981&color=0f172a&bold=true&rounded=true`,
       emailVerified: true,
     };

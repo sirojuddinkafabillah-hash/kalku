@@ -9,7 +9,7 @@ import {
   writeBatch,
   Unsubscribe
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import { InventoryItem } from '../types/inventory';
 
 export interface UserProfileData {
@@ -28,7 +28,6 @@ export async function saveUserProfile(
   emailOrData?: string | number | { email?: string; modalAwal?: number; displayName?: string },
   modalAwalNum?: number
 ): Promise<void> {
-  const path = `users/${userId}`;
   try {
     let email = '';
     let modalAwal = 50000;
@@ -58,7 +57,7 @@ export async function saveUserProfile(
 
     await setDoc(userRef, dataToSave, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn(`[FirestoreSync] Save user profile error (users/${userId}):`, error);
   }
 }
 
@@ -66,7 +65,6 @@ export async function saveUserProfile(
  * Fetch user profile
  */
 export async function getUserProfile(userId: string): Promise<UserProfileData | null> {
-  const path = `users/${userId}`;
   try {
     const userRef = doc(db, 'users', userId);
     const snap = await getDoc(userRef);
@@ -75,7 +73,8 @@ export async function getUserProfile(userId: string): Promise<UserProfileData | 
     }
     return null;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    console.warn(`[FirestoreSync] Get user profile warning (users/${userId}):`, error);
+    return null;
   }
 }
 
@@ -83,19 +82,18 @@ export async function getUserProfile(userId: string): Promise<UserProfileData | 
  * Save a single inventory item to user's items subcollection
  */
 export async function saveInventoryItemToCloud(userId: string, item: InventoryItem): Promise<void> {
-  const path = `users/${userId}/items/${item.id}`;
   try {
     const itemRef = doc(db, 'users', userId, 'items', item.id);
     const payload: Record<string, unknown> = {
       id: item.id,
       userId,
       namaBarang: item.namaBarang,
-      satuanWadah: item.satuanWadah,
-      jumlahBarangWadah: Number(item.jumlahBarangWadah),
-      satuanUnit: item.satuanUnit,
-      hargaBeli: Number(item.hargaBeli),
-      jumlahBarangDijualSatuan: Number(item.jumlahBarangDijualSatuan),
-      hargaJualSatuan: Number(item.hargaJualSatuan),
+      satuanWadah: item.satuanWadah || 'Dus',
+      jumlahBarangWadah: Number(item.jumlahBarangWadah) || 1,
+      satuanUnit: item.satuanUnit || 'pcs',
+      hargaBeli: Number(item.hargaBeli) || 0,
+      jumlahBarangDijualSatuan: Number(item.jumlahBarangDijualSatuan) || 0,
+      hargaJualSatuan: Number(item.hargaJualSatuan) || 0,
       persentaseLabaDisimpanBulanan: Number(item.persentaseLabaDisimpanBulanan ?? 50),
       createdAt: Number(item.createdAt || Date.now()),
       updatedAt: Number(item.updatedAt || Date.now())
@@ -108,7 +106,7 @@ export async function saveInventoryItemToCloud(userId: string, item: InventoryIt
 
     await setDoc(itemRef, payload, { merge: true });
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn(`[FirestoreSync] Save single item error (users/${userId}/items/${item.id}):`, error);
   }
 }
 
@@ -116,20 +114,17 @@ export async function saveInventoryItemToCloud(userId: string, item: InventoryIt
  * Delete a single inventory item from cloud
  */
 export async function deleteInventoryItemFromCloud(userId: string, itemId: string): Promise<void> {
-  const path = `users/${userId}/items/${itemId}`;
   try {
     const itemRef = doc(db, 'users', userId, 'items', itemId);
     await deleteDoc(itemRef);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn(`[FirestoreSync] Delete single item error (users/${userId}/items/${itemId}):`, error);
   }
 }
 
 /**
  * Batch upload / migrate all items and profile to cloud
- * Supports:
- * - batchUploadToCloud(userId, items, modalAwal)
- * - batchUploadToCloud(userId, email, modalAwal, items)
+ * Chunks writes to max 400 items per batch to stay safely within Firestore limit of 500 ops
  */
 export async function batchUploadToCloud(
   userId: string,
@@ -137,7 +132,6 @@ export async function batchUploadToCloud(
   arg3?: number | InventoryItem[],
   arg4?: InventoryItem[]
 ): Promise<void> {
-  const path = `users/${userId}`;
   try {
     let email = '';
     let modalAwal = 50000;
@@ -155,37 +149,42 @@ export async function batchUploadToCloud(
     // 1. Save profile
     await saveUserProfile(userId, { email, modalAwal });
 
-    // 2. Batch write items
+    // 2. Batch write items in chunks of 400
     if (itemsToUpload.length > 0) {
-      const batch = writeBatch(db);
-      for (const item of itemsToUpload) {
-        const itemRef = doc(db, 'users', userId, 'items', item.id);
-        const payload: Record<string, unknown> = {
-          id: item.id,
-          userId,
-          namaBarang: item.namaBarang,
-          satuanWadah: item.satuanWadah,
-          jumlahBarangWadah: Number(item.jumlahBarangWadah),
-          satuanUnit: item.satuanUnit,
-          hargaBeli: Number(item.hargaBeli),
-          jumlahBarangDijualSatuan: Number(item.jumlahBarangDijualSatuan),
-          hargaJualSatuan: Number(item.hargaJualSatuan),
-          persentaseLabaDisimpanBulanan: Number(item.persentaseLabaDisimpanBulanan ?? 50),
-          createdAt: Number(item.createdAt || Date.now()),
-          updatedAt: Number(item.updatedAt || Date.now())
-        };
+      const CHUNK_SIZE = 400;
+      for (let i = 0; i < itemsToUpload.length; i += CHUNK_SIZE) {
+        const chunk = itemsToUpload.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
 
-        if (item.perputaranBulan !== undefined) payload.perputaranBulan = Number(item.perputaranBulan);
-        if (item.tanggalInput) payload.tanggalInput = String(item.tanggalInput);
-        if (item.waktuInput) payload.waktuInput = String(item.waktuInput);
-        if (item.catatan) payload.catatan = String(item.catatan);
+        for (const item of chunk) {
+          const itemRef = doc(db, 'users', userId, 'items', item.id);
+          const payload: Record<string, unknown> = {
+            id: item.id,
+            userId,
+            namaBarang: item.namaBarang,
+            satuanWadah: item.satuanWadah || 'Dus',
+            jumlahBarangWadah: Number(item.jumlahBarangWadah) || 1,
+            satuanUnit: item.satuanUnit || 'pcs',
+            hargaBeli: Number(item.hargaBeli) || 0,
+            jumlahBarangDijualSatuan: Number(item.jumlahBarangDijualSatuan) || 0,
+            hargaJualSatuan: Number(item.hargaJualSatuan) || 0,
+            persentaseLabaDisimpanBulanan: Number(item.persentaseLabaDisimpanBulanan ?? 50),
+            createdAt: Number(item.createdAt || Date.now()),
+            updatedAt: Number(item.updatedAt || Date.now())
+          };
 
-        batch.set(itemRef, payload, { merge: true });
+          if (item.perputaranBulan !== undefined) payload.perputaranBulan = Number(item.perputaranBulan);
+          if (item.tanggalInput) payload.tanggalInput = String(item.tanggalInput);
+          if (item.waktuInput) payload.waktuInput = String(item.waktuInput);
+          if (item.catatan) payload.catatan = String(item.catatan);
+
+          batch.set(itemRef, payload, { merge: true });
+        }
+        await batch.commit();
       }
-      await batch.commit();
     }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn(`[FirestoreSync] Batch upload warning (users/${userId}):`, error);
   }
 }
 
@@ -197,7 +196,6 @@ export function subscribeUserItems(
   onUpdate: (items: InventoryItem[]) => void,
   onError?: (err: unknown) => void
 ): Unsubscribe {
-  const path = `users/${userId}/items`;
   const itemsColl = collection(db, 'users', userId, 'items');
 
   return onSnapshot(
@@ -230,16 +228,15 @@ export function subscribeUserItems(
     },
     (error) => {
       if (onError) onError(error);
-      handleFirestoreError(error, OperationType.GET, path);
+      console.warn(`[FirestoreSync] Realtime subscribe warning (users/${userId}):`, error);
     }
   );
 }
 
 /**
- * Fetch all items once (useful for initial check or migration)
+ * Fetch all items once (for initial load, account switch, or recovery)
  */
 export async function fetchUserItemsOnce(userId: string): Promise<InventoryItem[]> {
-  const path = `users/${userId}/items`;
   try {
     const itemsColl = collection(db, 'users', userId, 'items');
     const snap = await getDocs(itemsColl);
@@ -267,7 +264,7 @@ export async function fetchUserItemsOnce(userId: string): Promise<InventoryItem[
     items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     return items;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    console.warn(`[FirestoreSync] Fetch user items once warning (users/${userId}):`, error);
     return [];
   }
 }

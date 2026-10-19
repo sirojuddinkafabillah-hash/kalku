@@ -32,9 +32,11 @@ export async function connectToDatabase(): Promise<{ client: MongoClient; db: Db
             strict: true,
             deprecationErrors: true,
           },
-          connectTimeoutMS: 2500,
-          serverSelectionTimeoutMS: 2500,
-          socketTimeoutMS: 15000,
+          connectTimeoutMS: 15000,
+          serverSelectionTimeoutMS: 15000,
+          socketTimeoutMS: 30000,
+          maxPoolSize: 10,
+          minPoolSize: 1,
         });
       }
 

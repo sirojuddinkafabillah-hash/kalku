@@ -1,5 +1,21 @@
 {
-  "items": [],
+  "items": [
+    {
+      "namaBarang": "sprite",
+      "jumlahBarangWadah": 12,
+      "hargaBeli": 32000,
+      "jumlahBarangDijualSatuan": 0,
+      "hargaJualSatuan": 3500,
+      "tanggalInput": "2026-10-16",
+      "id": "import_1792395234737_0_51eh",
+      "satuanWadah": "Dus",
+      "satuanUnit": "pcs",
+      "perputaranBulan": 1,
+      "persentaseLabaDisimpanBulanan": 50,
+      "createdAt": 1792395234737,
+      "updatedAt": 1792395234737
+    }
+  ],
   "modalAwal": 50000,
   "updatedAt": "2026-10-18T15:48:00.000Z"
 }

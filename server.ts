@@ -255,47 +255,113 @@ app.post('/api/inventory/import', async (req, res) => {
   try {
     const { items, mode = 'append', modalAwal } = req.body;
     if (!Array.isArray(items)) {
-      return res.status(400).json({ success: false, message: 'Invalid items array' });
+      return res.status(400).json({ success: false, message: 'Invalid items array: harus berupa array data barang' });
     }
 
-    const db = await getDbInstance();
-    if (db) {
-      const itemsCollection = db.collection('inventory_items');
-      const settingsCollection = db.collection('settings');
+    const now = Date.now();
+    // Sanitize each item: strip immutable _id, ensure valid id, numbers and fields
+    const sanitizedItems = items.map((item: any, idx: number) => {
+      const { _id, ...clean } = item;
+      const validId = String(clean.id || `import_${now}_${idx}_${Math.random().toString(36).slice(2, 6)}`);
+      return {
+        ...clean,
+        id: validId,
+        namaBarang: String(clean.namaBarang || `Barang ${idx + 1}`),
+        jumlahBarangWadah: Math.max(1, Number(clean.jumlahBarangWadah) || 1),
+        satuanWadah: String(clean.satuanWadah || 'Dus'),
+        satuanUnit: String(clean.satuanUnit || 'pcs'),
+        hargaBeli: Math.max(0, Number(clean.hargaBeli) || 0),
+        hargaJualSatuan: Math.max(0, Number(clean.hargaJualSatuan) || 0),
+        jumlahBarangDijualSatuan: Math.max(0, Number(clean.jumlahBarangDijualSatuan) || 0),
+        perputaranBulan: Number(clean.perputaranBulan) || 1,
+        persentaseLabaDisimpanBulanan: Number(clean.persentaseLabaDisimpanBulanan) || 50,
+        tanggalInput: (() => {
+          let tgl = String(clean.tanggalInput || new Date().toISOString().slice(0, 10));
+          if (/^\d{5}(\.\d+)?$/.test(tgl.trim())) {
+            const num = parseFloat(tgl);
+            if (num > 20000 && num < 60000) {
+              const excelEpoch = new Date(1899, 11, 30);
+              const date = new Date(excelEpoch.getTime() + num * 86400000);
+              if (!isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+            }
+          }
+          return tgl;
+        })(),
+        createdAt: Number(clean.createdAt) || (now + idx),
+        updatedAt: now,
+      };
+    });
 
+    let dbSaved = false;
+    try {
+      const db = await getDbInstance();
+      if (db) {
+        const itemsCollection = db.collection('inventory_items');
+        const settingsCollection = db.collection('settings');
+
+        if (mode === 'replace') {
+          await itemsCollection.deleteMany({});
+          if (sanitizedItems.length > 0) {
+            await itemsCollection.insertMany(sanitizedItems);
+          }
+        } else {
+          if (sanitizedItems.length > 0) {
+            const operations = sanitizedItems.map((item: any) => ({
+              updateOne: {
+                filter: { id: item.id },
+                update: { $set: item },
+                upsert: true,
+              },
+            }));
+            await itemsCollection.bulkWrite(operations, { ordered: false });
+          }
+        }
+
+        if (typeof modalAwal === 'number' && modalAwal >= 0) {
+          await settingsCollection.updateOne(
+            { _id: 'app_settings' as any },
+            { $set: { modalAwal, updatedAt: Date.now() } },
+            { upsert: true }
+          );
+        }
+        dbSaved = true;
+      }
+    } catch (dbErr: any) {
+      console.warn('[MongoDB Atlas] Import DB error (will fallback to local cache):', dbErr?.message);
+    }
+
+    // Always sync to file fallback as safety net
+    try {
+      let currentData = { items: [] as any[], modalAwal: 50000 };
+      if (fs.existsSync(BACKUP_FILE)) {
+        currentData = JSON.parse(fs.readFileSync(BACKUP_FILE, 'utf-8'));
+      }
       if (mode === 'replace') {
-        await itemsCollection.deleteMany({});
+        currentData.items = sanitizedItems;
+      } else {
+        const incomingIds = new Set(sanitizedItems.map(i => i.id));
+        currentData.items = [...sanitizedItems, ...(currentData.items || []).filter((i: any) => !incomingIds.has(i.id))];
       }
-
-      if (items.length > 0) {
-        const operations = items.map((item: any) => ({
-          updateOne: {
-            filter: { id: item.id },
-            update: { $set: item },
-            upsert: true,
-          },
-        }));
-        await itemsCollection.bulkWrite(operations);
-      }
-
       if (typeof modalAwal === 'number' && modalAwal >= 0) {
-        await settingsCollection.updateOne(
-          { _id: 'app_settings' as any },
-          { $set: { modalAwal, updatedAt: Date.now() } },
-          { upsert: true }
-        );
+        currentData.modalAwal = modalAwal;
       }
+      fs.writeFileSync(BACKUP_FILE, JSON.stringify(currentData, null, 2), 'utf-8');
+    } catch (fileErr) {
+      console.warn('[Server] File fallback sync error:', fileErr);
     }
 
     return res.status(200).json({
       success: true,
-      message: `Berhasil mengimpor ${items.length} barang ke MongoDB Atlas`,
-      count: items.length,
+      message: dbSaved 
+        ? `Berhasil mengimpor ${sanitizedItems.length} barang ke MongoDB Atlas`
+        : `Berhasil mengimpor ${sanitizedItems.length} barang (tersimpan di server lokal)`,
+      count: sanitizedItems.length,
       mode,
+      source: dbSaved ? 'mongodb-atlas' : 'local-fallback',
     });
   } catch (err: any) {
     console.error('Error importing items to MongoDB:', err);
-    return res.status(500).json({ success: false, message: err.message });
+    return res.status(500).json({ success: false, message: err.message || 'Terjadi kesalahan pada server saat impor' });
   }
 });
 

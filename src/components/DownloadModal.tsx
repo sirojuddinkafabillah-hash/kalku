@@ -16,8 +16,10 @@ import {
   Server,
   Cloud,
   LogIn,
-  RefreshCw
+  RefreshCw,
+  Table
 } from 'lucide-react';
+import { exportToStyledExcel, exportToStandardCSV } from '../utils/excelExporter';
 
 interface DownloadModalProps {
   isOpen: boolean;
@@ -46,66 +48,24 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
 
   if (!isOpen) return null;
 
-  // 1. Download CSV
-  const handleDownloadCSV = () => {
-    const headers = [
-      'No',
-      'Tanggal Input',
-      'Nama Barang',
-      'Jumlah 1 Wadah',
-      'Harga Beli 1 Wadah',
-      'Jumlah Terjual Satuan',
-      'Harga Jual Satuan',
-      'Gain (Untung Terealisasi)',
-      'Modal Pokok Kembali',
-      'Nilai Sisa Stok (Equity)',
-      'TOTAL SETELAH UNTUNG (Uang Masuk Kas)',
-      'SISA KAS'
-    ];
-
-    let runningCash = modalAwal;
-    const sorted = [...items].sort((a, b) => a.createdAt - b.createdAt);
-    const rowCashMap = new Map<string, number>();
-    for (const it of sorted) {
-      runningCash = runningCash - (Number(it.hargaBeli) || 0) + ((Number(it.hargaJualSatuan) || 0) * (Number(it.jumlahBarangDijualSatuan) || 0));
-      rowCashMap.set(it.id, runningCash);
+  // 1. Download Excel (.xlsx) matching user screenshot format
+  const handleDownloadExcel = () => {
+    try {
+      exportToStyledExcel(items, modalAwal);
+      setStatusMessage({ type: 'success', text: 'Data berhasil diekspor ke file Excel (.xlsx) dengan 12 kolom!' });
+    } catch (e: any) {
+      setStatusMessage({ type: 'error', text: `Gagal mengekspor ke Excel: ${e?.message || 'Error'}` });
     }
+  };
 
-    const rows = items.map((item, idx) => {
-      const hpp = item.hargaBeli / (item.jumlahBarangWadah || 1);
-      const gainSatuan = item.hargaJualSatuan - hpp;
-      const gainTerjual = Math.max(0, gainSatuan * item.jumlahBarangDijualSatuan);
-      const modalBalik = Math.min(item.hargaBeli, hpp * item.jumlahBarangDijualSatuan);
-      const sisaStokQty = Math.max(0, item.jumlahBarangWadah - item.jumlahBarangDijualSatuan);
-      const nilaiSisaStok = sisaStokQty * hpp;
-      const totalMasukKas = modalBalik + gainTerjual;
-      const sisaKasRow = rowCashMap.get(item.id) ?? runningCash;
-
-      return [
-        idx + 1,
-        `"${item.tanggalInput || ''} ${item.waktuInput || ''}"`,
-        `"${item.namaBarang}"`,
-        item.jumlahBarangWadah,
-        item.hargaBeli,
-        item.jumlahBarangDijualSatuan,
-        item.hargaJualSatuan,
-        Math.round(gainTerjual),
-        Math.round(modalBalik),
-        Math.round(nilaiSisaStok),
-        Math.round(totalMasukKas),
-        Math.round(sisaKasRow)
-      ].join(',');
-    });
-
-    const csvContent = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `kalkulator_dagang_${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setStatusMessage({ type: 'success', text: 'Data berhasil diekspor ke format CSV (Excel)!' });
+  // 1b. Download CSV
+  const handleDownloadCSV = () => {
+    try {
+      exportToStandardCSV(items, modalAwal);
+      setStatusMessage({ type: 'success', text: 'Data berhasil diekspor ke format CSV dengan 12 kolom!' });
+    } catch (e: any) {
+      setStatusMessage({ type: 'error', text: `Gagal mengekspor ke CSV: ${e?.message || 'Error'}` });
+    }
   };
 
   // 2. Download JSON Backup
@@ -487,8 +447,22 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
               Ekspor & Rekap Laporan
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {/* Option: CSV / Excel */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {/* Option: Excel (.xlsx) Styled 12-Columns */}
+              <button
+                onClick={handleDownloadExcel}
+                className="p-3 rounded-xl border border-cyan-500/40 bg-[#1f4e78]/40 hover:bg-[#1f4e78]/70 flex items-center gap-2.5 text-left transition-all cursor-pointer group shadow-xs"
+              >
+                <div className="w-8 h-8 rounded-lg bg-[#1f4e78] text-cyan-200 border border-cyan-400/50 flex items-center justify-center shrink-0">
+                  <Table className="w-4 h-4 text-cyan-300" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-mono font-bold text-white">Excel (.xlsx) Format Toko</div>
+                  <div className="text-[10px] font-mono text-cyan-200/80">12 Kolom Persis Gambar</div>
+                </div>
+              </button>
+
+              {/* Option: CSV */}
               <button
                 onClick={handleDownloadCSV}
                 className="p-3 rounded-xl border border-slate-700 bg-slate-950 hover:bg-slate-800 flex items-center gap-2.5 text-left transition-all cursor-pointer group"
@@ -497,8 +471,8 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                   <FileSpreadsheet className="w-4 h-4" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-mono font-bold text-slate-100">Format Excel (CSV)</div>
-                  <div className="text-[10.5px] font-mono text-slate-400">Bisa dibuka di Excel & Sheets</div>
+                  <div className="text-xs font-mono font-bold text-slate-100">Format CSV (Excel)</div>
+                  <div className="text-[10px] font-mono text-slate-400">12 Kolom Standar</div>
                 </div>
               </button>
 
@@ -511,8 +485,8 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
                   <Laptop className="w-4 h-4" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-mono font-bold text-slate-100">Web Mandiri Offline (.html)</div>
-                  <div className="text-[10.5px] font-mono text-slate-400">Buka di HP/PC tanpa internet</div>
+                  <div className="text-xs font-mono font-bold text-slate-100">Web Mandiri (.html)</div>
+                  <div className="text-[10px] font-mono text-slate-400">Buka tanpa internet</div>
                 </div>
               </button>
             </div>

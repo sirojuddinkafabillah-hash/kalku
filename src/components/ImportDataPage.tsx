@@ -18,12 +18,22 @@ import {
   Info,
   ClipboardPaste,
   Sparkles,
-  Edit3
+  Table
 } from 'lucide-react';
+import {
+  USER_IMAGE_HEADERS,
+  USER_IMAGE_SAMPLE_ROWS,
+  exportToStyledExcel,
+  exportToStandardCSV,
+  downloadUserImageTemplateExcel,
+  downloadUserImageTemplateCSV,
+  buildExcelExportRows
+} from '../utils/excelExporter';
 
 interface ImportDataPageProps {
   currentItemsCount: number;
   currentModalAwal: number;
+  currentItems?: InventoryItem[];
   onImportSuccess: (importedItems: InventoryItem[], newModalAwal?: number, mode?: 'append' | 'replace') => void;
   onNavigateToInventory: () => void;
 }
@@ -47,24 +57,17 @@ export const parseIndonesianNumber = (val: any): number => {
   const hasComma = str.includes(',');
 
   if (hasDot && hasComma) {
-    // Determine which is decimal separator
     if (str.lastIndexOf(',') > str.lastIndexOf('.')) {
-      // 1.500.000,50 -> dot is thousand, comma is decimal
       str = str.replace(/\./g, '').replace(',', '.');
     } else {
-      // 1,500,000.50 -> comma is thousand, dot is decimal
       str = str.replace(/,/g, '');
     }
   } else if (hasDot && !hasComma) {
     const parts = str.split('.');
     if (parts.length > 2) {
-      // Multiple dots: e.g. 1.500.000
       str = parts.join('');
     } else if (parts.length === 2 && parts[1].length === 3) {
-      // 50.000 -> Indonesian thousands separator!
       str = parts.join('');
-    } else if (parts.length === 2 && parts[1].length !== 3) {
-      // e.g. 2.5 or 10.50 -> decimal
     }
   } else if (hasComma && !hasDot) {
     const parts = str.split(',');
@@ -81,68 +84,10 @@ export const parseIndonesianNumber = (val: any): number => {
   return isNaN(num) ? 0 : num;
 };
 
-// Pre-defined sample items for instant test
-const SAMPLE_IMPORT_ITEMS: any[] = [
-  {
-    'Tanggal Input': new Date().toISOString().slice(0, 10),
-    'Nama Barang': 'Air Mineral 600ml',
-    'Satuan Wadah': 'Dus',
-    'Jumlah 1 Wadah': 24,
-    'Satuan Unit': 'botol',
-    'Harga Beli 1 Wadah': 48000,
-    'Harga Jual Satuan': 3000,
-    'Jumlah Terjual Satuan': 6,
-    'Catatan': 'Kulakan grosir agen sembako'
-  },
-  {
-    'Tanggal Input': new Date().toISOString().slice(0, 10),
-    'Nama Barang': 'Kopi Sachet Hitam Mantap',
-    'Satuan Wadah': 'Renceng',
-    'Jumlah 1 Wadah': 10,
-    'Satuan Unit': 'sachet',
-    'Harga Beli 1 Wadah': 12000,
-    'Harga Jual Satuan': 2000,
-    'Jumlah Terjual Satuan': 5,
-    'Catatan': 'Stok warung laris'
-  },
-  {
-    'Tanggal Input': new Date().toISOString().slice(0, 10),
-    'Nama Barang': 'Minyak Goreng Refill 2L',
-    'Satuan Wadah': 'Karton',
-    'Jumlah 1 Wadah': 6,
-    'Satuan Unit': 'pouch',
-    'Harga Beli 1 Wadah': 190000,
-    'Harga Jual Satuan': 36000,
-    'Jumlah Terjual Satuan': 2,
-    'Catatan': 'Minyak goreng kemasan'
-  },
-  {
-    'Tanggal Input': new Date().toISOString().slice(0, 10),
-    'Nama Barang': 'Beras Premium 5kg',
-    'Satuan Wadah': 'Karung',
-    'Jumlah 1 Wadah': 5,
-    'Satuan Unit': 'kg',
-    'Harga Beli 1 Wadah': 68000,
-    'Harga Jual Satuan': 15000,
-    'Jumlah Terjual Satuan': 3,
-    'Catatan': 'Beras pulen wangi'
-  },
-  {
-    'Tanggal Input': new Date().toISOString().slice(0, 10),
-    'Nama Barang': 'Gula Pasir Kristal 1kg',
-    'Satuan Wadah': 'Karton',
-    'Jumlah 1 Wadah': 10,
-    'Satuan Unit': 'kg',
-    'Harga Beli 1 Wadah': 155000,
-    'Harga Jual Satuan': 18000,
-    'Jumlah Terjual Satuan': 4,
-    'Catatan': 'Gula pasir putih murni'
-  }
-];
-
 export const ImportDataPage: React.FC<ImportDataPageProps> = ({
   currentItemsCount,
   currentModalAwal,
+  currentItems = [],
   onImportSuccess,
   onNavigateToInventory,
 }) => {
@@ -158,7 +103,7 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Find column value by candidates
+  // Find column value by potential matching header names
   const findValue = (row: any, candidates: string[]): any => {
     if (!row || typeof row !== 'object') return undefined;
     const keys = Object.keys(row);
@@ -184,56 +129,65 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
         return;
       }
 
+      // 1. Nama Barang
       const namaBarang = String(findValue(row, [
-        'nama barang', 'nama_barang', 'nama', 'barang', 'item', 'produk', 'nama produk', 
+        'Nama Barang', 'nama barang', 'nama_barang', 'nama', 'barang', 'item', 'produk', 'nama produk', 
         'deskripsi', 'description', 'uraian', 'product', 'nama_produk', 'kode/nama', 'title'
       ]) || '').trim();
 
+      // 2. Satuan Wadah (default 'Dus' or read from wadah)
       const satuanWadah = String(findValue(row, [
-        'satuan wadah', 'satuan_wadah', 'wadah', 'kemasan', 'satuan beli', 'packaging', 
+        'Satuan Wadah', 'satuan wadah', 'satuan_wadah', 'wadah', 'kemasan', 'satuan beli', 'packaging', 
         'pack', 'dus', 'karton', 'satuan', 'unit wadah', 'satuan_beli'
       ]) || 'Dus').trim();
 
+      // 3. Jumlah 1 Wadah (exact match with user image column)
       let jumlahBarangWadah = parseIndonesianNumber(findValue(row, [
-        'jumlah 1 wadah', 'isi wadah', 'isi', 'jumlah barang wadah', 'qty wadah', 'isi 1 wadah', 
+        'Jumlah 1 Wadah', 'jumlah 1 wadah', 'isi wadah', 'isi', 'jumlah barang wadah', 'qty wadah', 'isi 1 wadah', 
         'jumlah', 'qty', 'kuantitas', 'kapasitas', 'isi per wadah', 'pcs per dus', 'isi dus', 
         'isi karton', 'banyaknya', 'isi_wadah', 'jumlah_barang_wadah', 'isi/kemasan', 'pcs/dus'
       ]));
       if (jumlahBarangWadah <= 0) jumlahBarangWadah = 1;
 
+      // 4. Satuan Unit
       const satuanUnit = String(findValue(row, [
-        'satuan unit', 'satuan_unit', 'unit', 'satuan kecil', 'satuan jual', 'satuan_ecer', 'satuan_eceran', 'pcs'
+        'Satuan Unit', 'satuan unit', 'satuan_unit', 'unit', 'satuan kecil', 'satuan jual', 'satuan_ecer', 'satuan_eceran', 'pcs'
       ]) || 'pcs').trim();
 
+      // 5. Harga Beli 1 Wadah (exact match with user image column)
       let hargaBeli = parseIndonesianNumber(findValue(row, [
-        'harga beli 1 wadah', 'harga beli', 'harga_beli', 'modal wadah', 'modal', 'beli', 
+        'Harga Beli 1 Wadah', 'harga beli 1 wadah', 'harga beli', 'harga_beli', 'modal wadah', 'modal', 'beli', 
         'buy price', 'cost', 'hpp', 'harga pokok', 'harga kulakan', 'harga modal', 'harga grosir', 
         'kulakan', 'total modal', 'modal beli', 'harga beli wadah', 'harga_beli_wadah'
       ]));
 
+      // 6. Harga Jual Satuan (exact match with user image column)
       let hargaJualSatuan = parseIndonesianNumber(findValue(row, [
-        'harga jual satuan', 'harga jual', 'harga_jual', 'harga_jual_satuan', 'jual', 
+        'Harga Jual Satuan', 'harga jual satuan', 'harga jual', 'harga_jual', 'harga_jual_satuan', 'jual', 
         'harga ecer', 'harga eceran', 'sell price', 'price', 'tarif', 'harga jual eceran', 
         'pricelist', 'harga_eceran', 'harga_jual_unit'
       ]));
 
+      // 7. Jumlah Terjual Satuan (exact match with user image column)
       const jumlahBarangDijualSatuan = parseIndonesianNumber(findValue(row, [
-        'jumlah terjual satuan', 'jumlah terjual', 'terjual', 'jumlah_terjual', 'unit terjual', 
-        'laku', 'sold', 'qty jual', 'sudah laku', 'terjual satuan', 'penjualan', 'qty terjual', 'terjual (unit)'
+        'Jumlah Terjual Satuan', 'jumlah terjual satuan', 'jumlah terjual', 'terjual', 'jumlah_terjual', 
+        'unit terjual', 'laku', 'sold', 'qty jual', 'sudah laku', 'terjual satuan', 'penjualan', 'qty terjual', 'terjual (unit)'
       ])) || 0;
 
+      // 8. Tanggal Input (exact match with user image column)
       const tanggalInput = String(findValue(row, [
-        'tanggal input', 'tanggal', 'tgl', 'date', 'created_at', 'waktu', 'tanggal masuk', 'tanggal beli'
+        'Tanggal Input', 'tanggal input', 'tanggal', 'tgl', 'date', 'created_at', 'waktu', 'tanggal masuk', 'tanggal beli'
       ]) || new Date().toISOString().slice(0, 10)).trim();
 
+      // 9. Catatan
       const catatan = String(findValue(row, [
-        'catatan', 'keterangan', 'note', 'notes', 'ket', 'supplier', 'suplier', 'distributor'
+        'Catatan', 'catatan', 'keterangan', 'note', 'notes', 'ket', 'supplier', 'suplier', 'distributor'
       ]) || '').trim();
 
       // Smart fallback: If hargaJualSatuan is empty but hargaBeli is filled, auto-calculate +25% markup
       if (hargaJualSatuan <= 0 && hargaBeli > 0) {
         const modalPerUnit = hargaBeli / Math.max(1, jumlahBarangWadah);
-        hargaJualSatuan = Math.ceil((modalPerUnit * 1.25) / 500) * 500; // Round to nearest Rp 500
+        hargaJualSatuan = Math.ceil((modalPerUnit * 1.25) / 500) * 500;
       }
 
       // If hargaBeli is empty but hargaJualSatuan is filled, estimate 80% cost
@@ -282,7 +236,7 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
     setParsedRows(parsed);
   };
 
-  // Parse Text pasted from Excel or Google Sheets (tab or semicolon separated)
+  // Parse Text pasted from Excel or Google Sheets
   const handleProcessPastedText = () => {
     if (!pastedText.trim()) {
       setResultMessage({ type: 'error', text: 'Kotak teks masih kosong. Salin tabel dari Excel atau Google Sheets lalu tempel di sini.' });
@@ -295,7 +249,6 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
       return;
     }
 
-    // Detect delimiter: tab (\t), semicolon (;), or comma (,)
     const firstLine = lines[0];
     let delimiter = '\t';
     if (firstLine.includes('\t')) {
@@ -306,10 +259,8 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
       delimiter = ',';
     }
 
-    // Check if first line looks like headers or data
     const headerCols = firstLine.split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
     
-    // Check if any header matches known keywords
     const isHeader = headerCols.some(col => 
       ['nama', 'barang', 'item', 'produk', 'wadah', 'isi', 'harga', 'beli', 'jual', 'terjual', 'modal'].some(kw => 
         col.toLowerCase().includes(kw)
@@ -320,7 +271,7 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
     const dataStartIndex = isHeader ? 1 : 0;
     const finalHeaders = isHeader 
       ? headerCols 
-      : ['Nama Barang', 'Satuan Wadah', 'Jumlah 1 Wadah', 'Harga Beli 1 Wadah', 'Harga Jual Satuan', 'Jumlah Terjual Satuan'];
+      : ['No', 'Tanggal Input', 'Nama Barang', 'Jumlah 1 Wadah', 'Harga Beli 1 Wadah', 'Jumlah Terjual Satuan', 'Harga Jual Satuan'];
 
     for (let i = dataStartIndex; i < lines.length; i++) {
       const parts = lines[i].split(delimiter).map(c => c.trim().replace(/^["']|["']$/g, ''));
@@ -411,62 +362,9 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
     }
   };
 
-  // Instant Sample Test
-  const handleLoadSample = () => {
-    processRawData(SAMPLE_IMPORT_ITEMS, 'Contoh Data Toko (5 Produk)');
-  };
-
-  // Download template Excel
-  const handleDownloadTemplateExcel = () => {
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(SAMPLE_IMPORT_ITEMS);
-    ws['!cols'] = [
-      { wch: 14 },
-      { wch: 26 },
-      { wch: 14 },
-      { wch: 16 },
-      { wch: 12 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 22 },
-      { wch: 26 }
-    ];
-    XLSX.utils.book_append_sheet(wb, ws, 'Data Barang Toko');
-    XLSX.writeFile(wb, 'Template_Impor_Barang_NiagaNova.xlsx');
-  };
-
-  // Download template CSV
-  const handleDownloadTemplateCSV = () => {
-    const headers = [
-      'Tanggal Input',
-      'Nama Barang',
-      'Satuan Wadah',
-      'Jumlah 1 Wadah',
-      'Satuan Unit',
-      'Harga Beli 1 Wadah',
-      'Harga Jual Satuan',
-      'Jumlah Terjual Satuan',
-      'Catatan'
-    ];
-    const rows = SAMPLE_IMPORT_ITEMS.map(i => [
-      i['Tanggal Input'],
-      `"${i['Nama Barang']}"`,
-      i['Satuan Wadah'],
-      i['Jumlah 1 Wadah'],
-      i['Satuan Unit'],
-      i['Harga Beli 1 Wadah'],
-      i['Harga Jual Satuan'],
-      i['Jumlah Terjual Satuan'],
-      `"${i['Catatan']}"`
-    ]);
-    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'Template_Impor_Barang_NiagaNova.csv';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // Instant Sample Test with exact 21 rows from user's image
+  const handleLoadSampleFromImage = () => {
+    processRawData(USER_IMAGE_SAMPLE_ROWS, 'Format Gambar Pengguna (21 Produk Lengkap)');
   };
 
   // Update item in preview table directly
@@ -475,7 +373,6 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
       const updated = [...prev];
       const target = { ...updated[idx].item, [field]: value };
       
-      // revalidate
       let error: string | undefined = undefined;
       if (!target.namaBarang) error = 'Nama barang tidak boleh kosong';
       else if (target.hargaBeli <= 0 && target.hargaJualSatuan <= 0) error = 'Harap isi harga beli atau jual';
@@ -528,8 +425,24 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
     }
   };
 
+  // Export current inventory in database using the exact 12-column format
+  const handleExportCurrentInventory = () => {
+    if (!currentItems || currentItems.length === 0) {
+      setResultMessage({ type: 'error', text: 'Belum ada data barang di toko untuk diekspor.' });
+      return;
+    }
+    exportToStyledExcel(currentItems, currentModalAwal);
+    setResultMessage({
+      type: 'success',
+      text: `Berhasil mengekspor ${currentItems.length} data barang ke file Excel (.xlsx) dengan 12 kolom sesuai format gambar!`
+    });
+  };
+
   const validCount = parsedRows.filter(r => r.isValid).length;
   const invalidCount = parsedRows.filter(r => !r.isValid).length;
+
+  // Running cash calculation for the preview table
+  let runningCashPreview = typeof newModalAwal === 'number' ? newModalAwal : currentModalAwal;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
@@ -538,45 +451,62 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
-              <UploadCloud className="w-5 h-5" />
+              <Table className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                  Pusat Impor Data Penjualan & Kulakan
+                  Pusat Impor & Ekspor Data Kasir Toko
                 </h1>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                  Excel / CSV / Copy-Paste
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#1f4e78] text-cyan-200 border border-cyan-500/40">
+                  Format 12 Kolom Excel
                 </span>
               </div>
               <p className="text-xs text-slate-400 font-mono mt-0.5">
-                Simpan ribuan data kulakan & harga jual sekaligus ke database MongoDB Atlas Cluster0
+                Dukungan format tabel persis gambar: No, Tanggal, Nama, Wadah, Beli, Terjual, Jual, Gain, Modal Kembali, Sisa Stok, Total Omset, Sisa Kas
               </p>
             </div>
           </div>
 
-          {/* Quick Actions */}
-          <div className="flex flex-wrap items-center gap-2.5 font-mono">
+          {/* Quick Actions Bar */}
+          <div className="flex flex-wrap items-center gap-2 font-mono">
+            {/* Export Current Data Button */}
+            {currentItems.length > 0 && (
+              <button
+                onClick={handleExportCurrentInventory}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/50 text-emerald-300 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
+                title="Ekspor seluruh data barang toko saat ini ke file Excel dengan 12 kolom persis seperti gambar"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Ekspor Excel Format Ini ({currentItems.length} Barang)</span>
+              </button>
+            )}
+
+            {/* Load 21 Sample Items from Image */}
             <button
-              onClick={handleLoadSample}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
-              title="Coba impor 5 data produk toko contoh dalam 1-klik"
+              onClick={handleLoadSampleFromImage}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1f4e78]/80 hover:bg-[#1f4e78] border border-cyan-500/50 text-cyan-200 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs"
+              title="Muat 21 data produk contoh dari gambar (sprite, coco pie, aquviva, kiko, pino, dilan, dll)"
             >
               <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Coba Data Contoh (1-Klik)</span>
+              <span>Coba 21 Data Gambar (1-Klik)</span>
             </button>
 
+            {/* Download Template Excel */}
             <button
-              onClick={handleDownloadTemplateExcel}
+              onClick={downloadUserImageTemplateExcel}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+              title="Unduh file template Excel (.xlsx) dengan 12 kolom persis seperti gambar"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
               <span>Unduh Template Excel</span>
             </button>
 
+            {/* Download Template CSV */}
             <button
-              onClick={handleDownloadTemplateCSV}
+              onClick={downloadUserImageTemplateCSV}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+              title="Unduh file template CSV dengan 12 kolom persis seperti gambar"
             >
               <FileText className="w-3.5 h-3.5 text-cyan-400" />
               <span>Unduh Template CSV</span>
@@ -607,7 +537,7 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
           )}
           <div className="flex-1">
             <div className="font-bold text-white mb-0.5">
-              {resultMessage.type === 'success' ? 'Impor Berhasil Disimpan!' : 'Perhatian'}
+              {resultMessage.type === 'success' ? 'Berhasil!' : 'Perhatian'}
             </div>
             <div>{resultMessage.text}</div>
             {resultMessage.type === 'success' && (
@@ -716,14 +646,14 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
                 ) : (
                   <div>
                     <div className="text-sm font-bold text-white tracking-tight">
-                      Tarik file ke sini, atau klik untuk memilih file
+                      Tarik file Excel format tabel ke sini, atau klik untuk memilih
                     </div>
                     <p className="text-xs text-slate-400 mt-1 font-mono">
-                      Mendukung format Microsoft Excel (.xlsx, .xls), Tabel CSV (.csv), dan JSON
+                      Mendukung format file persis gambar (.xlsx, .xls, .csv) atau JSON
                     </p>
                     <div className="mt-3 flex items-center justify-center gap-2">
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
-                        .XLSX
+                        .XLSX (Format Gambar)
                       </span>
                       <span className="px-2 py-0.5 rounded-md text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
                         .CSV
@@ -743,18 +673,18 @@ export const ImportDataPage: React.FC<ImportDataPageProps> = ({
                 <textarea
                   value={pastedText}
                   onChange={(e) => setPastedText(e.target.value)}
-                  placeholder={`Contoh tempel (bisa dari Excel / Google Sheets):
-Nama Barang\tSatuan Wadah\tIsi\tHarga Beli\tHarga Jual
-Beras 5kg\tKarung\t5\t65000\t15000
-Gula Pasir\tKarton\t10\t145000\t17500
-Kopi Sachet\tRenceng\t10\t12000\t2000`}
+                  placeholder={`Tempel baris tabel langsung dari Excel (Ctrl+V):
+No\tTanggal Input\tNama Barang\tJumlah 1 Wadah\tHarga Beli 1 Wadah\tJumlah Terjual Satuan\tHarga Jual Satuan
+1\t2026-10-16\tsprite\t12\t32000\t0\t3500
+2\t2026-10-16\tcoco pie\t12\t20700\t0\t2000
+3\t2026-10-16\taquviva\t48\t38000\t0\t1000`}
                   rows={8}
                   className="w-full p-3 text-xs bg-slate-950 border border-slate-700 rounded-2xl text-white placeholder:text-slate-600 font-mono focus:outline-none focus:border-cyan-500 resize-y"
                 />
 
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <p className="text-[11px] font-mono text-slate-400">
-                    Tips: Di Excel/Google Sheets, pilih kolom data lalu tekan <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Ctrl+C</kbd>, lalu <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Ctrl+V</kbd> di sini.
+                    Tips: Di Excel/Google Sheets, pilih baris lalu tekan <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Ctrl+C</kbd>, lalu <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">Ctrl+V</kbd> di sini.
                   </p>
                   <button
                     type="button"
@@ -773,7 +703,7 @@ Kopi Sachet\tRenceng\t10\t12000\t2000`}
           <div className="mt-4 pt-3 border-t border-slate-800 flex items-start gap-2 text-[11px] font-mono text-slate-400">
             <Info className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
             <span>
-              Format kolom didukung fleksibel: <strong>Nama Barang</strong>, <strong>Satuan Wadah</strong> (Dus/Karton), <strong>Jumlah Isi</strong>, <strong>Harga Beli</strong> (contoh: Rp 50.000), <strong>Harga Jual</strong>, dan <strong>Terjual</strong>.
+              12 Kolom yang dibaca otomatis: <strong>No</strong>, <strong>Tanggal Input</strong>, <strong>Nama Barang</strong>, <strong>Jumlah 1 Wadah</strong>, <strong>Harga Beli 1 Wadah</strong>, <strong>Jumlah Terjual Satuan</strong>, <strong>Harga Jual Satuan</strong>, <strong>Gain</strong>, <strong>Modal Pokok Kembali</strong>, <strong>Nilai Sisa Stok</strong>, <strong>TOTAL SETELAH UNTUNG</strong>, dan <strong>SISA KAS</strong>.
             </span>
           </div>
         </div>
@@ -860,7 +790,7 @@ Kopi Sachet\tRenceng\t10\t12000\t2000`}
                 className="w-full px-3 py-2 text-xs bg-slate-950 border border-slate-700 rounded-xl text-white font-mono focus:outline-none focus:border-emerald-500"
               />
               <p className="text-[10px] font-mono text-slate-400">
-                Nilai modal kasir awal yang digunakan untuk menghitung arus kas berjalan.
+                Nilai modal kasir awal yang digunakan untuk menghitung kolom SISA KAS berjalan.
               </p>
             </div>
           </div>
@@ -903,23 +833,23 @@ Kopi Sachet\tRenceng\t10\t12000\t2000`}
         </div>
       </div>
 
-      {/* PREVIEW & INLINE EDITABLE VALIDATION TABLE */}
+      {/* PREVIEW & INLINE EDITABLE VALIDATION TABLE MATCHING USER'S IMAGE */}
       {parsedRows.length > 0 && (
         <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/60 rounded-3xl p-5 sm:p-6 shadow-[0_20px_50px_rgba(0,0,0,0.4)] space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                <Eye className="w-4 h-4" />
+              <div className="w-7 h-7 rounded-lg bg-[#1f4e78] border border-cyan-500/40 flex items-center justify-center text-cyan-200">
+                <Table className="w-4 h-4" />
               </div>
               <div>
                 <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-white flex items-center gap-2">
-                  <span>Pratinjau Data ({parsedRows.length} Baris)</span>
-                  <span className="text-[10px] text-slate-400 font-normal">
-                    (Bisa diedit langsung pada tabel sebelum disimpan)
+                  <span>Pratinjau Tabel Excel ({parsedRows.length} Baris)</span>
+                  <span className="text-[10px] text-cyan-400 font-normal">
+                    (Format 12 Kolom Persis Seperti Gambar)
                   </span>
                 </h2>
                 <p className="text-[11px] font-mono text-slate-400">
-                  Periksa kelengkapan nama, wadah, modal beli, dan harga jual sebelum masuk database
+                  Dapat diedit langsung sebelum disimpan ke database MongoDB Atlas
                 </p>
               </div>
             </div>
@@ -936,45 +866,49 @@ Kopi Sachet\tRenceng\t10\t12000\t2000`}
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/60 max-h-[460px] overflow-y-auto">
+          <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950/60 max-h-[520px] overflow-y-auto">
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-slate-900 text-slate-300 font-mono uppercase text-[10px] tracking-wider border-b border-slate-800">
-                  <th className="py-2.5 px-3 font-bold w-12">No</th>
-                  <th className="py-2.5 px-3 font-bold w-20">Status</th>
-                  <th className="py-2.5 px-3 font-bold min-w-[180px]">Nama Barang</th>
-                  <th className="py-2.5 px-3 font-bold min-w-[140px]">Kemasan & Isi</th>
-                  <th className="py-2.5 px-3 font-bold min-w-[120px] text-right">Harga Beli (Wadah)</th>
-                  <th className="py-2.5 px-3 font-bold min-w-[120px] text-right">Harga Jual (Satuan)</th>
-                  <th className="py-2.5 px-3 font-bold min-w-[90px] text-center">Terjual</th>
-                  <th className="py-2.5 px-3 font-bold min-w-[110px] text-right text-emerald-300">Untung/Unit</th>
+              <thead className="sticky top-0 z-10 shadow-md">
+                <tr className="bg-[#1f4e78] text-white font-mono text-[10px] font-bold uppercase tracking-wider border-b border-cyan-800/80">
+                  <th className="py-3 px-2 text-center w-10 border-r border-[#2a6496]">No</th>
+                  <th className="py-3 px-3 min-w-[100px] border-r border-[#2a6496]">Tanggal Input</th>
+                  <th className="py-3 px-3 min-w-[140px] border-r border-[#2a6496]">Nama Barang</th>
+                  <th className="py-3 px-3 text-right min-w-[100px] border-r border-[#2a6496]">Jumlah 1 Wadah</th>
+                  <th className="py-3 px-3 text-right min-w-[120px] border-r border-[#2a6496]">Harga Beli 1 Wadah</th>
+                  <th className="py-3 px-3 text-right min-w-[120px] border-r border-[#2a6496]">Jumlah Terjual Satuan</th>
+                  <th className="py-3 px-3 text-right min-w-[110px] border-r border-[#2a6496]">Harga Jual Satuan</th>
+                  <th className="py-3 px-3 text-right min-w-[130px] border-r border-[#2a6496] text-emerald-200">Gain (Untung Terealisasi)</th>
+                  <th className="py-3 px-3 text-right min-w-[120px] border-r border-[#2a6496]">Modal Pokok Kembali</th>
+                  <th className="py-3 px-3 text-right min-w-[120px] border-r border-[#2a6496]">Nilai Sisa Stok (Equity)</th>
+                  <th className="py-3 px-3 text-right min-w-[170px] border-r border-[#2a6496] text-cyan-200">TOTAL SETELAH UNTUNG (Uang Masuk Kas)</th>
+                  <th className="py-3 px-3 text-right min-w-[110px] text-amber-200">SISA KAS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80 font-mono text-[11px]">
                 {parsedRows.map((row, idx) => {
                   const { item, isValid, error } = row;
                   const calc = calculateItem(item);
+                  
+                  // Compute row's cash effect
+                  const beli = Number(item.hargaBeli) || 0;
+                  const uangMasuk = calc.totalPendapatanTerjual;
+                  runningCashPreview = runningCashPreview - beli + uangMasuk;
 
                   return (
                     <tr 
                       key={item.id}
                       className={isValid ? 'hover:bg-slate-900/60' : 'bg-rose-950/20 hover:bg-rose-950/30'}
                     >
-                      <td className="py-2 px-3 text-slate-500">{idx + 1}</td>
-                      <td className="py-2 px-3">
-                        {isValid ? (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-semibold">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Valid</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[10px] text-rose-400 font-semibold" title={error}>
-                            <AlertTriangle className="w-3.5 h-3.5" />
-                            <span>{error || 'Error'}</span>
-                          </span>
-                        )}
+                      <td className="py-2 px-2 text-center text-slate-500 border-r border-slate-800">{idx + 1}</td>
+                      <td className="py-2 px-3 text-slate-300 border-r border-slate-800 whitespace-nowrap">
+                        <input
+                          type="text"
+                          value={item.tanggalInput || ''}
+                          onChange={(e) => handleUpdatePreviewRow(idx, 'tanggalInput', e.target.value)}
+                          className="w-24 px-1.5 py-1 bg-transparent border-b border-transparent hover:border-slate-700 focus:border-cyan-500 focus:outline-none text-slate-300 text-xs"
+                        />
                       </td>
-                      <td className="py-2 px-3">
+                      <td className="py-2 px-3 font-sans font-bold text-white border-r border-slate-800">
                         <input
                           type="text"
                           value={item.namaBarang}
@@ -982,50 +916,58 @@ Kopi Sachet\tRenceng\t10\t12000\t2000`}
                           className="w-full px-2 py-1 bg-slate-900/80 border border-slate-700/60 rounded text-white font-sans text-xs focus:border-cyan-500 focus:outline-none"
                         />
                       </td>
-                      <td className="py-2 px-3">
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            min="1"
-                            value={item.jumlahBarangWadah}
-                            onChange={(e) => handleUpdatePreviewRow(idx, 'jumlahBarangWadah', Math.max(1, Number(e.target.value)))}
-                            className="w-14 px-1.5 py-1 bg-slate-900/80 border border-slate-700/60 rounded text-white text-xs text-center focus:border-cyan-500 focus:outline-none"
-                          />
-                          <span className="text-slate-400 text-[10px]">{item.satuanUnit} /</span>
-                          <span className="text-slate-300 text-[10px] font-semibold">{item.satuanWadah}</span>
-                        </div>
+                      <td className="py-2 px-3 text-right border-r border-slate-800">
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.jumlahBarangWadah}
+                          onChange={(e) => handleUpdatePreviewRow(idx, 'jumlahBarangWadah', Math.max(1, Number(e.target.value)))}
+                          className="w-16 px-1.5 py-1 bg-slate-900/80 border border-slate-700/60 rounded text-white text-xs text-right focus:border-cyan-500 focus:outline-none"
+                        />
                       </td>
-                      <td className="py-2 px-3 text-right">
+                      <td className="py-2 px-3 text-right border-r border-slate-800">
                         <input
                           type="number"
                           min="0"
-                          step="500"
+                          step="100"
                           value={item.hargaBeli}
                           onChange={(e) => handleUpdatePreviewRow(idx, 'hargaBeli', Math.max(0, Number(e.target.value)))}
                           className="w-24 px-1.5 py-1 bg-slate-900/80 border border-slate-700/60 rounded text-white text-xs text-right focus:border-cyan-500 focus:outline-none"
                         />
                       </td>
-                      <td className="py-2 px-3 text-right">
+                      <td className="py-2 px-3 text-right border-r border-slate-800">
+                        <input
+                          type="number"
+                          min="0"
+                          value={item.jumlahBarangDijualSatuan}
+                          onChange={(e) => handleUpdatePreviewRow(idx, 'jumlahBarangDijualSatuan', Math.max(0, Number(e.target.value)))}
+                          className="w-16 px-1.5 py-1 bg-slate-900/80 border border-slate-700/60 rounded text-white text-xs text-right focus:border-cyan-500 focus:outline-none"
+                        />
+                      </td>
+                      <td className="py-2 px-3 text-right border-r border-slate-800">
                         <input
                           type="number"
                           min="0"
                           step="100"
                           value={item.hargaJualSatuan}
                           onChange={(e) => handleUpdatePreviewRow(idx, 'hargaJualSatuan', Math.max(0, Number(e.target.value)))}
-                          className="w-24 px-1.5 py-1 bg-slate-900/80 border border-slate-700/60 rounded text-white text-xs text-right focus:border-cyan-500 focus:outline-none"
+                          className="w-20 px-1.5 py-1 bg-slate-900/80 border border-slate-700/60 rounded text-white text-xs text-right focus:border-cyan-500 focus:outline-none"
                         />
                       </td>
-                      <td className="py-2 px-3 text-center">
-                        <input
-                          type="number"
-                          min="0"
-                          value={item.jumlahBarangDijualSatuan}
-                          onChange={(e) => handleUpdatePreviewRow(idx, 'jumlahBarangDijualSatuan', Math.max(0, Number(e.target.value)))}
-                          className="w-14 px-1.5 py-1 bg-slate-900/80 border border-slate-700/60 rounded text-white text-xs text-center focus:border-cyan-500 focus:outline-none"
-                        />
+                      <td className="py-2 px-3 text-right font-bold text-emerald-400 border-r border-slate-800">
+                        {Math.round(calc.totalGainTerjual).toLocaleString('id-ID')}
                       </td>
-                      <td className="py-2 px-3 text-right font-bold text-emerald-400">
-                        +{formatRupiah(calc.gainSatuan)}
+                      <td className="py-2 px-3 text-right text-slate-300 border-r border-slate-800">
+                        {Math.round(calc.totalModalKembali).toLocaleString('id-ID')}
+                      </td>
+                      <td className="py-2 px-3 text-right text-slate-300 border-r border-slate-800">
+                        {Math.round(calc.nilaiSisaStok).toLocaleString('id-ID')}
+                      </td>
+                      <td className="py-2 px-3 text-right font-bold text-cyan-300 border-r border-slate-800">
+                        {Math.round(uangMasuk).toLocaleString('id-ID')}
+                      </td>
+                      <td className="py-2 px-3 text-right font-bold text-amber-300">
+                        {Math.round(runningCashPreview).toLocaleString('id-ID')}
                       </td>
                     </tr>
                   );

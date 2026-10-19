@@ -607,6 +607,7 @@ export default function App() {
             <ImportDataPage
               currentItemsCount={items.length}
               currentModalAwal={modalAwal}
+              currentItems={items}
               onImportSuccess={handleImportSuccess}
               onNavigateToInventory={() => setActivePage('inventory')}
             />

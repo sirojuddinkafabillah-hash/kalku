@@ -23,6 +23,7 @@ import {
   ArrowDownRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { USER_IMAGE_HEADERS, buildExcelExportRows } from '../utils/excelExporter';
 
 interface ReportsEquityPageProps {
   items: InventoryItem[];
@@ -130,26 +131,31 @@ export const ReportsEquityPage: React.FC<ReportsEquityPageProps> = ({
   const percentCash = Math.max(0, Math.min(100, (summary.saldoKasSaatIni / totalAssets) * 100));
   const percentStock = Math.max(0, Math.min(100, (summary.totalNilaiSisaStok / totalAssets) * 100));
 
-  // Export report to Excel
+  // Export report to Excel matching user image layout
   const handleExportExcel = () => {
-    const reportData = analyzedItems.map((entry, idx) => ({
-      'No': idx + 1,
-      'Tanggal Input': entry.item.tanggalInput || new Date(entry.item.createdAt).toISOString().slice(0, 10),
-      'Nama Barang': entry.item.namaBarang,
-      'Wadah Kulakan': `${entry.item.jumlahBarangWadah} ${entry.item.satuanUnit} / ${entry.item.satuanWadah}`,
-      'Harga Beli Kulakan (Rp)': entry.item.hargaBeli,
-      'HPP Pokok Satuan (Rp)': Math.round(entry.calc.hppSatuan),
-      'Unit Terjual': entry.item.jumlahBarangDijualSatuan,
-      'Sisa Stok Unit': entry.calc.sisaStokSatuan,
-      'Harga Jual Satuan (Rp)': entry.item.hargaJualSatuan,
-      'Total Omset Masuk Kas (Rp)': entry.calc.totalPendapatanTerjual,
-      'Modal Pokok Kembali (Rp)': Math.round(entry.calc.totalModalKembali),
-      'Laba Bersih Terjual (Rp)': Math.round(entry.calc.totalGainTerjual),
-      'Margin Laba (%)': Number(entry.calc.marginPersen.toFixed(1)),
-      'Nilai Sisa Stok / Ekuitas Aset (Rp)': Math.round(entry.calc.nilaiSisaStok),
-      'Status Lunas Modal': entry.calc.isModalLunas ? 'LUNAS (BEP)' : 'Belum Lunas'
-    }));
+    // 1. Primary Sheet: exact 12-column layout matching user's image
+    const exportRows = buildExcelExportRows(filteredItems, modalAwal);
+    const wsStoreFormat = XLSX.utils.json_to_sheet(exportRows, { header: USER_IMAGE_HEADERS });
 
+    wsStoreFormat['!cols'] = [
+      { wch: 6 },   // No
+      { wch: 14 },  // Tanggal Input
+      { wch: 22 },  // Nama Barang
+      { wch: 16 },  // Jumlah 1 Wadah
+      { wch: 18 },  // Harga Beli 1 Wadah
+      { wch: 22 },  // Jumlah Terjual Satuan
+      { wch: 18 },  // Harga Jual Satuan
+      { wch: 24 },  // Gain (Untung Terealisasi)
+      { wch: 20 },  // Modal Pokok Kembali
+      { wch: 22 },  // Nilai Sisa Stok (Equity)
+      { wch: 38 },  // TOTAL SETELAH UNTUNG (Uang Masuk Kas)
+      { wch: 16 },  // SISA KAS
+    ];
+
+    const range = XLSX.utils.decode_range(wsStoreFormat['!ref'] || 'A1:L1');
+    wsStoreFormat['!autofilter'] = { ref: `A1:L${range.e.r + 1}` };
+
+    // 2. Summary Sheet
     const summarySheetData = [
       { 'Indikator Ekuitas & Keuangan': 'Modal Awal Usaha', 'Nilai (Rp)': modalAwal },
       { 'Indikator Ekuitas & Keuangan': 'Total Pengeluaran Kulakan', 'Nilai (Rp)': summary.totalPengeluaranBeli },
@@ -161,13 +167,11 @@ export const ReportsEquityPage: React.FC<ReportsEquityPageProps> = ({
       { 'Indikator Ekuitas & Keuangan': 'TOTAL EKUITAS BISNIS (Kas + Stok)', 'Nilai (Rp)': totalEkuitasUsaha },
       { 'Indikator Ekuitas & Keuangan': 'Pertumbuhan Modal / ROI (%)', 'Nilai (Rp)': `${persenPertumbuhanEkuitas.toFixed(2)}%` },
     ];
-
-    const wb = XLSX.utils.book_new();
-    const wsReport = XLSX.utils.json_to_sheet(reportData);
     const wsSummary = XLSX.utils.json_to_sheet(summarySheetData);
 
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Ringkasan Ekuitas');
-    XLSX.utils.book_append_sheet(wb, wsReport, 'Rincian Penjualan');
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsStoreFormat, 'Laporan_Kasir_Format_Toko');
+    XLSX.utils.book_append_sheet(wb, wsSummary, 'Ringkasan_Ekuitas');
 
     const fileName = `Laporan_Ekuitas_Penjualan_${selectedMonth === 'all' ? 'Semua_Periode' : selectedMonth}.xlsx`;
     XLSX.writeFile(wb, fileName);

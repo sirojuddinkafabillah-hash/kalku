@@ -23,9 +23,22 @@
           "type": "string",
           "description": "ISO timestamp of last update",
           "maxLength": 64
+        },
+        "globalSavePercentMonthly": {
+          "type": "number",
+          "description": "Default percentage of profit saved monthly (0-100)"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Optional display name",
+          "maxLength": 256
         }
       },
-      "required": ["userId", "email", "modalAwal"]
+      "required": [
+        "userId",
+        "email",
+        "modalAwal"
+      ]
     },
     "InventoryItem": {
       "title": "InventoryItem",
@@ -105,7 +118,20 @@
           "description": "Last update timestamp in milliseconds"
         }
       },
-      "required": ["id", "userId", "namaBarang", "satuanWadah", "jumlahBarangWadah", "satuanUnit", "hargaBeli", "jumlahBarangDijualSatuan", "hargaJualSatuan", "persentaseLabaDisimpanBulanan", "createdAt", "updatedAt"]
+      "required": [
+        "id",
+        "userId",
+        "namaBarang",
+        "satuanWadah",
+        "jumlahBarangWadah",
+        "satuanUnit",
+        "hargaBeli",
+        "jumlahBarangDijualSatuan",
+        "hargaJualSatuan",
+        "persentaseLabaDisimpanBulanan",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
